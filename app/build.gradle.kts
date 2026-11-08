@@ -47,7 +47,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     // Pleos Connect SDK
     implementation("ai.pleos.playground:NaviHelper:3.0.5")
-    implementation("ai.pleos.playground:Vehicle:2.3.2")
+    // Vehicle SDK는 쓰지 않으므로 넣지 않음: 라이브러리만 넣어도 Vehicle 퍼미션(VEHICLE_BINDING)이 APK에 병합되고,
+    // Vehicle SDK 퍼미션은 Pleos App Market 사전 승인 없이는 심사를 통과할 수 없음 (App Review Guidelines)
     implementation("ai.pleos.playground:SpeechToText:3.3.1")
     implementation("ai.pleos.playground:TextToSpeech:3.3.1")
     testImplementation(libs.junit)

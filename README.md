@@ -169,6 +169,8 @@ firestore.rules              Firestore 보안 규칙
 - 매장 접근 알림(지오펜스), 주행/정차 화면 분리(Vehicle SDK)
 - 탑승 인원에 맞춘 추천(Vehicle 착좌 정보)
 
+> Vehicle SDK 퍼미션은 Pleos App Market과 사전 협의·승인된 경우에만 선언할 수 있고, 승인되지 않은 퍼미션을 선언하면 심사를 통과할 수 없습니다([App Review Guidelines](https://document.pleos.ai/docs/pleos-only/distribute/app-review-guide/review-functionality-performance-stability)). 그래서 지금 앱은 Vehicle SDK를 포함하지 않으며, 위 두 항목은 승인 범위를 주최 측에 확인한 뒤 진행합니다.
+
 ---
 
 팀명 미정 · 영남대학교
