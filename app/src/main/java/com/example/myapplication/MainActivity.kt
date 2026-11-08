@@ -30,10 +30,15 @@ import org.json.JSONObject
 import java.util.Calendar
 import java.util.TimeZone
 import ai.pleos.playground.navi.constants.NaviErrorCode
+import ai.pleos.playground.navi.constants.WaypointIndex
 import ai.pleos.playground.navi.data.CurrentLocationInfo
 import ai.pleos.playground.navi.data.DestinationInfo
+import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteInfo
 import ai.pleos.playground.navi.data.RouteStartInfo
+import ai.pleos.playground.navi.data.WaypointArrivedInfo
+import ai.pleos.playground.navi.data.WaypointChangedInfo
+import ai.pleos.playground.navi.data.WaypointInfo
 import ai.pleos.playground.navi.helper.NaviHelper
 import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
 import com.example.myapplication.ui.theme.MyApplicationTheme
@@ -63,6 +68,8 @@ class MainActivity : ComponentActivity() {
     private var recs by mutableStateOf<List<Recommendation>>(emptyList())  // 5단계: 주문 버튼용
     private var order by mutableStateOf<Order?>(null)   // 5단계: 진행 중인 주문
     private var orderText by mutableStateOf("")
+    private var waypointAdded = false                 // 6단계: 매장을 내비 경유지로 추가했는지
+    @Volatile private var waypointRemainSec: Long? = null  // 6단계: 내비가 준 매장(경유지)까지 남은 시간
 
     // 추천에 필요한 값 (내비에서 받아 저장)
     private var curLat: Double? = null
@@ -72,9 +79,9 @@ class MainActivity : ComponentActivity() {
     private var lastRemainSec: Long? = null
     private var stores: List<Store> = emptyList()
 
-    // 현재 위치를 아직 못 받았을 때 쓰는 기본값: 에뮬레이터 기본 위치(42dot 근처)
-    private val DEFAULT_LAT = 37.48544722
-    private val DEFAULT_LNG = 127.03636666
+    // 현재 위치를 아직 못 받았을 때 쓰는 기본값: 에뮬레이터 기본 위치(성남 42dot 사옥 근처, 로그로 확인)
+    private val DEFAULT_LAT = 37.4127212
+    private val DEFAULT_LNG = 127.094681
 
     private val naviListener = object : NaviHelperEventListener {
         override fun onRouteStarted(routeStartInfo: RouteStartInfo) {
@@ -120,7 +127,32 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { plan = newPlan }
 
             // 5단계: 주문이 있으면 새 ETA로 매장 도착·전송 시각 재계산
-            if (!noRoute && remain != null) rescheduleOrder(remain)
+            // (매장이 경유지로 잡히기 전까지만 위치 비율로 추정 → 이후엔 내비의 경유지 ETA 사용)
+            if (!noRoute && remain != null && waypointRemainSec == null) rescheduleOrder(estimateStoreRemain(remain))
+        }
+
+        // 6단계: 경유지 추가/삭제 결과 → 경유지 정보(남은 시간) 요청
+        override fun onWaypointChanged(waypointChangedInfo: WaypointChangedInfo) {
+            Log.d(TAG, "경유지 변경: $waypointChangedInfo")
+            naviHelper.getWaypointInfo()
+        }
+
+        // 6단계: 경유지 목록 수신 → 주문 매장과 같은 위치의 경유지 ETA로 전송 시각 재계산
+        override fun onWayPointInfo(waypointInfoList: List<WaypointInfo>) {
+            val current = order ?: return
+            val wp = waypointInfoList.firstOrNull {
+                PickupWaypoint.matches(it.name, it.latitude, it.longitude, current.storeName, current.storeLat, current.storeLng)
+            }
+            Log.d(TAG, "경유지 ${waypointInfoList.size}개, 매장 경유지: ${wp?.remainTime}초 / ${wp?.remainDistance}m")
+            if (wp == null) return
+            waypointRemainSec = wp.remainTime.toLong()
+            rescheduleOrder(wp.remainTime.toLong())
+        }
+
+        // 6단계: 매장(경유지) 도착
+        override fun onWayPointArrived(waypointArrivedInfo: WaypointArrivedInfo) {
+            Log.d(TAG, "경유지 도착: $waypointArrivedInfo")
+            runOnUiThread { plan = "🛍️ 픽업 매장에 도착했어요: ${waypointArrivedInfo.name}" }
         }
 
         // 4단계: 현재 위치 수신 (getCurrentLocationInfo() 호출 결과)
@@ -160,6 +192,7 @@ class MainActivity : ComponentActivity() {
                         naviHelper.getDestinationInfo()
                         naviHelper.getCurrentLocationInfo()
                     }
+                    if (connected && waypointAdded) naviHelper.getWaypointInfo()
                     syncOrderStatus()
                     delay(POLL_MS)
                 }
@@ -175,20 +208,20 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(24.dp))
                     Button(onClick = {
                         lastRemain = null
-                        // 공식 문서 예제 좌표 (서울 강남, 42dot)
+                        // 데모 목적지: 강남역 (가상 매장들이 강남역 주변에 있음. 출발은 에뮬레이터 기본 위치 성남 42dot)
                         naviHelper.requestRoute(
                             RouteInfo(
-                                latitude = 37.48544722,
-                                longitude = 127.03636666,
+                                latitude = 37.4979,
+                                longitude = 127.0276,
                                 displayLongitude = null,
                                 displayLatitude = null,
-                                poiName = "42dot",
-                                poiId = "36khp37hh8gqcm5nqhe5",
+                                poiName = "강남역",
+                                poiId = "",
                                 poiSubId = "0",
-                                address = "서울시 강남구 남부순환로 2621"
+                                address = "서울 강남구 강남대로 396"
                             )
                         )
-                    }) { Text("① 목적지 설정 (테스트)") }
+                    }) { Text("① 목적지: 강남역 (데모)") }
                     Spacer(Modifier.height(12.dp))
                     Button(onClick = {
                         // 내비에 이미 설정된 경로가 있으면 그 경로로 자동 조회 시작
@@ -230,7 +263,13 @@ class MainActivity : ComponentActivity() {
                     Text(orderText, fontSize = 22.sp)
                     if (order != null) {
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = { order = null; orderText = "" }) { Text("주문 화면 닫기 (테스트용)") }
+                        Button(onClick = {
+                            if (waypointAdded) naviHelper.removeWaypoint(WaypointIndex.FIRST)
+                            waypointAdded = false
+                            waypointRemainSec = null
+                            order = null
+                            orderText = ""
+                        }) { Text("주문 화면 닫기 + 경유지 삭제 (테스트용)") }
                     }
                 }
             }
@@ -324,6 +363,8 @@ class MainActivity : ComponentActivity() {
             check(code in 200..299) { "HTTP $code" }
             Log.d(TAG, "주문 생성 ${newOrder.id}: 도착 ${rec.arriveSec}초 뒤, 조리 ${rec.menu.cookMin}분")
             order = newOrder
+            waypointRemainSec = null
+            addStoreWaypoint(newOrder)
             renderOrder()
         } catch (e: Exception) {
             Log.e(TAG, "주문 실패", e)
@@ -331,17 +372,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // 5단계: 주행 중 새 ETA로 매장 도착·전송 시각을 다시 계산해 서버에 반영 (정체 시 전송 연기)
-    private fun rescheduleOrder(destRemainSec: Long) {
-        val current = order ?: return
-        val dLat = destLat ?: return
-        val dLng = destLng ?: return
+    // 6단계: 주문 매장을 내비 경유지로 추가 → 이후 내비가 매장까지 남은 시간을 직접 알려 줌
+    private fun addStoreWaypoint(o: Order) {
+        naviHelper.addWaypoint(
+            RequestWaypointInfo(
+                latitude = o.storeLat,
+                longitude = o.storeLng,
+                poiName = o.storeName,
+                waypointIndex = WaypointIndex.FIRST,
+                poiId = "",          // 가상 매장이라 내비 POI ID 없음
+                address = "",
+                poiSubId = "0"
+            )
+        )
+        waypointAdded = true
+        Log.d(TAG, "경유지 추가 요청: ${o.storeName} (${o.storeLat}, ${o.storeLng})")
+    }
+
+    // 경유지 ETA를 받기 전: 목적지 ETA × 매장의 경로상 위치 비율로 매장까지 남은 시간 추정
+    private fun estimateStoreRemain(destRemainSec: Long): Long? {
+        val current = order ?: return null
+        val dLat = destLat ?: return null
+        val dLng = destLng ?: return null
         val (_, t) = Recommender.distanceToSegment(
             current.storeLat, current.storeLng, curLat ?: DEFAULT_LAT, curLng ?: DEFAULT_LNG, dLat, dLng
         )
-        val updated = OrderScheduler.reschedule(
-            current, System.currentTimeMillis(), OrderScheduler.storeRemainSec(destRemainSec, t)
-        ) ?: return
+        return OrderScheduler.storeRemainSec(destRemainSec, t)
+    }
+
+    // 5단계: 주행 중 매장까지 남은 시간으로 도착·전송 시각을 다시 계산해 서버에 반영 (정체 시 전송 연기)
+    private fun rescheduleOrder(storeRemainSec: Long?) {
+        if (storeRemainSec == null) return
+        val current = order ?: return
+        val updated = OrderScheduler.reschedule(current, System.currentTimeMillis(), storeRemainSec) ?: return
         lifecycleScope.launch {
             try {
                 FirestoreRest.patchFields(
