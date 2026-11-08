@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// DriveOrder Firestore 보안 규칙
+//
+// 적용 방법: Firebase 콘솔 → Firestore Database → 규칙(Rules) 탭에 이 파일 내용을 붙여넣고 게시.
+//
+// 전제와 한계
+//  - 차량 앱과 매장 웹은 로그인(인증) 없이 REST로 접근합니다. 그래서 이 규칙은 "누가"를 막지 못하고,
+//    "무엇을" 쓸 수 있는지(문서 모양, 바꿀 수 있는 필드, 상태 순서)만 제한합니다.
+//    실서비스라면 Firebase Auth(매장 계정 / 차량 익명 인증)를 붙여 request.auth로 구분해야 합니다.
+//  - 테스트 모드 규칙(누구나 읽기·쓰기, 30일 뒤 만료)을 대체합니다. 이 규칙에는 만료가 없습니다.
+//  - 이 규칙은 Firebase 에뮬레이터/규칙 시뮬레이터로 아직 검증하지 않았습니다(2026-11-08).
+//    게시 전에 콘솔의 '규칙 플레이그라운드'로 아래 5가지 쓰기를 한 번씩 확인하세요.
+//
+// 앱이 실제로 하는 쓰기 (이것만 허용)
+//  1. stores      : 쓰기 금지. 매장 데이터는 규칙 적용 전에 앱의 "③ 업로드"로 올리거나 콘솔에서 수정.
+//  2. orders 생성 : 차량 앱 placeOrder()  — status = "scheduled", 필수 필드 전부
+//  3. orders 수정 : 차량 앱 rescheduleOrder() — etaAt, sendAt 만
+//  4. orders 수정 : 차량 앱 syncOrderStatus() — status: scheduled → sent
+//  5. orders 수정 : 매장 웹 setStatus()      — status: scheduled/sent → cooking → ready → picked_up
+//  삭제는 금지(테스트 정리는 콘솔에서).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- 매장 ----------
+    match /stores/{storeId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ---------- 주문 ----------
+    match /orders/{orderId} {
+      allow read: if true;
+
+      // 2. 새 주문: 모양이 맞고, 처음 상태는 scheduled
+      allow create: if isValidOrder(request.resource.data)
+                    && request.resource.data.id == orderId
+                    && request.resource.data.status == 'scheduled';
+
+      // 3~5. 수정: 시각 갱신 또는 상태 한 단계 진행만
+      allow update: if onlyChanged(['etaAt', 'sendAt'])
+                       && request.resource.data.etaAt is int
+                       && request.resource.data.sendAt is int
+                    || onlyChanged(['status'])
+                       && isNextStatus(resource.data.status, request.resource.data.status);
+
+      allow delete: if false;
+    }
+
+    // ---------- 함수 ----------
+    function onlyChanged(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    function isNextStatus(from, to) {
+      return (from == 'scheduled' && to in ['sent', 'cooking'])
+          || (from == 'sent'      && to == 'cooking')
+          || (from == 'cooking'   && to == 'ready')
+          || (from == 'ready'     && to == 'picked_up');
+    }
+
+    function isValidOrder(o) {
+      return o.keys().hasAll(['id', 'storeId', 'storeName', 'storeLat', 'storeLng', 'menuName',
+                              'price', 'cookMin', 'createdAt', 'etaAt', 'sendAt', 'status'])
+          && o.keys().hasOnly(['id', 'storeId', 'storeName', 'storeLat', 'storeLng', 'menuName',
+                               'price', 'cookMin', 'createdAt', 'etaAt', 'sendAt', 'status'])
+          && o.storeId is string && exists(/databases/$(database)/documents/stores/$(o.storeId))
+          && o.menuName is string && o.menuName.size() > 0 && o.menuName.size() <= 50
+          && o.storeName is string && o.storeName.size() <= 50
+          && o.price is int && o.price > 0 && o.price <= 1000000
+          && o.cookMin is int && o.cookMin > 0 && o.cookMin <= 120
+          && o.storeLat is number && o.storeLng is number
+          && o.createdAt is int && o.etaAt is int && o.sendAt is int
+          && o.sendAt <= o.etaAt;
+    }
+  }
+}
