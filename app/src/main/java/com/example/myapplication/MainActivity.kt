@@ -41,6 +41,17 @@ import ai.pleos.playground.navi.data.WaypointChangedInfo
 import ai.pleos.playground.navi.data.WaypointInfo
 import ai.pleos.playground.navi.helper.NaviHelper
 import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
+import ai.pleos.playground.stt.SpeechToText
+import ai.pleos.playground.stt.constant.ErrorType as SttErrorType
+import ai.pleos.playground.stt.constant.Mode as SttMode
+import ai.pleos.playground.stt.listener.OnInitializeListener as SttInitListener
+import ai.pleos.playground.stt.listener.ResultListener
+import ai.pleos.playground.tts.TextToSpeech
+import ai.pleos.playground.tts.constant.ErrorType as TtsErrorType
+import ai.pleos.playground.tts.constant.Mode as TtsMode
+import ai.pleos.playground.tts.listener.EventListener as TtsEventListener
+import ai.pleos.playground.tts.listener.OnInitializeListener as TtsInitListener
+import java.util.Locale
 import com.example.myapplication.ui.theme.MyApplicationTheme
 
 /**
@@ -70,6 +81,16 @@ class MainActivity : ComponentActivity() {
     private var orderText by mutableStateOf("")
     private var waypointAdded = false                 // 6단계: 매장을 내비 경유지로 추가했는지
     @Volatile private var waypointRemainSec: Long? = null  // 6단계: 내비가 준 매장(경유지)까지 남은 시간
+
+    // 7단계: 음성 주문
+    private var tts: TextToSpeech? = null
+    private var stt: SpeechToText? = null
+    @Volatile private var ttsReady = false
+    @Volatile private var sttReady = false
+    private var listenAfterSpeak = false              // 안내를 다 읽은 뒤 바로 들을지
+    private val voiceDialog = VoiceDialog { tags -> computeRecs(tags, limit = 10) }
+    private var voiceStatus by mutableStateOf("")
+    private var voiceLog by mutableStateOf("")
 
     // 추천에 필요한 값 (내비에서 받아 저장)
     private var curLat: Double? = null
@@ -184,6 +205,8 @@ class MainActivity : ComponentActivity() {
             }
         )
 
+        initVoice()
+
         // 1단계: 화면이 보이는 동안 5초마다 남은 시간 자동 조회
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -205,6 +228,18 @@ class MainActivity : ComponentActivity() {
                     Text(status, fontSize = 22.sp)
                     Spacer(Modifier.height(16.dp))
                     Text(plan, fontSize = 26.sp)
+                    Spacer(Modifier.height(16.dp))
+                    // 7단계: 음성 주문. 마이크가 안 되는 환경(에뮬레이터 등)을 위해 같은 문장을 버튼으로도 입력
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { startVoiceOrder() }) { Text("🎤 음성 주문", fontSize = 22.sp) }
+                        listOf("국물 있는 거", "치킨", "네", "아니요", "취소").forEach { say ->
+                            Button(onClick = { handleVoice(say) }) {
+                                Text("\"$say\"")
+                            }
+                        }
+                    }
+                    if (voiceStatus.isNotEmpty()) Text(voiceStatus, fontSize = 20.sp)
+                    if (voiceLog.isNotEmpty()) Text(voiceLog, fontSize = 22.sp)
                     Spacer(Modifier.height(24.dp))
                     Button(onClick = {
                         lastRemain = null
@@ -322,19 +357,12 @@ class MainActivity : ComponentActivity() {
                 stores = FirestoreRest.listDocuments("stores").map { storeFromJson(it) }
             }
             val remain = lastRemainSec
-            val dLat = destLat
-            val dLng = destLng
-            if (remain == null || dLat == null || dLng == null) {
+            val recs = computeRecs(tags)
+            if (remain == null || recs == null) {
                 recText = "⚠️ 경로 정보가 없습니다. 내비에 목적지를 설정하고 ② 버튼을 먼저 누르세요."
                 return@launch
             }
-            val cLat = curLat ?: DEFAULT_LAT
-            val cLng = curLng ?: DEFAULT_LNG
-            // 에뮬레이터 시계가 UTC일 수 있어 한국 시간으로 계산
-            val hour = demoHour
-                ?: Calendar.getInstance(TimeZone.getTimeZone("Asia/Seoul")).get(Calendar.HOUR_OF_DAY)
-
-            val recs = Recommender.recommend(stores, cLat, cLng, dLat, dLng, remain, hour, tags)
+            val hour = currentHour()
             this@MainActivity.recs = recs
             val timeLabel = if (demoHour != null) "데모 ${hour}시" else "현재 ${hour}시"
             val header = "$timeLabel · 목적지까지 ${remain / 60}분 · 조건 ${if (tags.isEmpty()) "없음" else tags.joinToString()}"
@@ -352,6 +380,124 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "추천 실패", e)
             recText = "❌ 추천 실패: ${e.message}"
         }
+    }
+
+    // 에뮬레이터 시계가 UTC일 수 있어 한국 시간으로 계산
+    private fun currentHour(): Int = demoHour
+        ?: Calendar.getInstance(TimeZone.getTimeZone("Asia/Seoul")).get(Calendar.HOUR_OF_DAY)
+
+    /** 현재 경로·시각 기준 추천 (매장 목록은 미리 불러와 있어야 함). 경로 정보가 없으면 null */
+    private fun computeRecs(tags: Set<String>, limit: Int = 3): List<Recommendation>? {
+        val remain = lastRemainSec ?: return null
+        val dLat = destLat ?: return null
+        val dLng = destLng ?: return null
+        return Recommender.recommend(
+            stores, curLat ?: DEFAULT_LAT, curLng ?: DEFAULT_LNG, dLat, dLng, remain, currentHour(), tags, limit
+        )
+    }
+
+    // ---------- 7단계: 음성 주문 (STT/TTS, ON_DEVICE 모드라 앱 등록 불필요) ----------
+
+    private fun initVoice() {
+        tts = TextToSpeech(applicationContext, TtsMode.ON_DEVICE).also { t ->
+            t.initialize(object : TtsInitListener {
+                override fun onSuccess() {
+                    ttsReady = true
+                    t.setLocale(Locale.KOREA)   // ko-KR (Locale.KOREAN은 "ko-"로 전달돼 엔진이 거부함)
+                    t.addEventListener(ttsListener)
+                    Log.d(TAG, "TTS 초기화 성공")
+                }
+                override fun onFailure(errorType: TtsErrorType) {
+                    Log.e(TAG, "TTS 초기화 실패: $errorType")
+                    runOnUiThread { voiceStatus = "TTS 사용 불가($errorType): 화면 글자로 안내" }
+                }
+            })
+        }
+        stt = SpeechToText(applicationContext, SttMode.ON_DEVICE).also { s ->
+            s.initialize(object : SttInitListener {
+                override fun onSuccess() {
+                    sttReady = true
+                    s.setLocale(Locale.KOREA)   // ko-KR (Locale.KOREAN은 "ko-"로 전달돼 엔진이 거부함)
+                    s.addListener(sttListener)
+                    Log.d(TAG, "STT 초기화 성공")
+                }
+                override fun onFailure(errorType: SttErrorType) {
+                    Log.e(TAG, "STT 초기화 실패: $errorType")
+                    runOnUiThread { voiceStatus = "STT 사용 불가($errorType): 아래 버튼으로 답하세요" }
+                }
+            })
+        }
+    }
+
+    private val ttsListener = object : TtsEventListener {
+        override fun onStart() = Unit
+        override fun onReady() = Unit
+        override fun onUpdatedRms(rms: Double) = Unit
+        override fun onStop() = Unit
+        override fun onDone() { runOnUiThread { if (listenAfterSpeak) startListening() } }
+        override fun onError(errorType: TtsErrorType) {
+            Log.e(TAG, "TTS 오류: $errorType")
+            runOnUiThread { if (listenAfterSpeak) startListening() }   // 못 읽어도 대화는 계속
+        }
+    }
+
+    private val sttListener = object : ResultListener {
+        override fun onReady() = Unit
+        override fun onStartedRecognition() { runOnUiThread { voiceStatus = "🎤 듣는 중..." } }
+        override fun onUpdatedEpdData(on: Long, off: Long) = Unit
+        override fun onUpdatedRms(rms: Double) = Unit
+        override fun onEndedRecognition() { runOnUiThread { if (voiceStatus.startsWith("🎤")) voiceStatus = "" } }
+        override fun onUpdated(stt: String, completed: Boolean) {
+            runOnUiThread {
+                voiceStatus = "🎤 $stt"
+                if (completed && stt.isNotBlank()) handleVoice(stt)
+            }
+        }
+        override fun onError(errorType: SttErrorType) {
+            Log.e(TAG, "STT 오류: $errorType")
+            runOnUiThread { voiceStatus = "음성 인식 오류($errorType): 아래 버튼으로 답하세요" }
+        }
+    }
+
+    /** 🎤 버튼: 매장 목록을 준비하고 대화 시작 */
+    private fun startVoiceOrder() = lifecycleScope.launch {
+        try {
+            if (stores.isEmpty()) stores = FirestoreRest.listDocuments("stores").map { storeFromJson(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "매장 불러오기 실패", e)
+        }
+        voiceLog = ""
+        speakReply(voiceDialog.start())
+    }
+
+    /** STT 최종 결과 또는 대체 버튼 입력 */
+    private fun handleVoice(text: String) {
+        if (!voiceDialog.isActive) return
+        stt?.takeIf { sttReady }?.stop()
+        appendVoiceLog("🙂 $text")
+        speakReply(voiceDialog.handle(text))
+    }
+
+    private fun speakReply(reply: VoiceDialog.Reply) {
+        appendVoiceLog("🔊 ${reply.say}")
+        Log.d(TAG, "음성 안내: ${reply.say} (듣기=${reply.listen})")
+        reply.order?.let { placeOrder(it) }
+        listenAfterSpeak = reply.listen
+        if (ttsReady) tts?.speak(reply.say, true) else if (reply.listen) startListening()
+    }
+
+    private fun startListening() {
+        listenAfterSpeak = false
+        if (sttReady) {
+            voiceStatus = "🎤 말씀하세요"
+            stt?.request()
+        } else {
+            voiceStatus = "음성 인식 준비 안 됨: 아래 버튼으로 답하세요"
+        }
+    }
+
+    private fun appendVoiceLog(line: String) {
+        voiceLog = (voiceLog.lines().filter { it.isNotBlank() } + line).takeLast(6).joinToString("\n")
     }
 
     // 5단계: 추천 메뉴로 주문 생성 → Firestore "orders"에 저장 (매장 웹은 sendAt이 지나면 표시)
@@ -456,6 +602,8 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         naviHelper.removeListener(naviListener)
         naviHelper.release()
+        stt?.let { it.removeListener(sttListener); it.release() }
+        tts?.let { it.removeEventListener(ttsListener); it.release() }
         super.onDestroy()
     }
 }
