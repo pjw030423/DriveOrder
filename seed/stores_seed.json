@@ -1,0 +1,96 @@
+{
+  "_comment": "DriveOrder 데모용 가상 매장·메뉴 데이터. 매장 이름·메뉴·가격은 모두 가상이며 실제 업체와 무관합니다. 좌표는 데모 경로(양재 42dot 근처 → 강남역) 주변의 대략적인 위치입니다.",
+  "version": 1,
+  "stores": [
+    {
+      "id": "store_001",
+      "name": "한끼찌개 (가상)",
+      "category": "한식",
+      "lat": 37.4975,
+      "lng": 127.0283,
+      "address": "서울 강남구 강남역 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 22,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_001_1", "name": "김치찌개", "price": 9000, "cookMin": 10, "tags": ["국물", "매운", "1인", "식사"] },
+        { "id": "m_001_2", "name": "된장찌개", "price": 8500, "cookMin": 10, "tags": ["국물", "1인", "식사"] },
+        { "id": "m_001_3", "name": "제육볶음 정식", "price": 10000, "cookMin": 12, "tags": ["매운", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_002",
+      "name": "역삼버거랩 (가상)",
+      "category": "패스트푸드",
+      "lat": 37.4990,
+      "lng": 127.0310,
+      "address": "서울 강남구 역삼동 인근 (가상)",
+      "openHour": 9,
+      "closeHour": 23,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_002_1", "name": "클래식 버거 세트", "price": 8900, "cookMin": 7, "tags": ["빠름", "1인", "식사"] },
+        { "id": "m_002_2", "name": "치킨 버거 세트", "price": 9500, "cookMin": 8, "tags": ["빠름", "1인", "식사"] },
+        { "id": "m_002_3", "name": "감자튀김", "price": 3000, "cookMin": 5, "tags": ["빠름", "간식"] }
+      ]
+    },
+    {
+      "id": "store_003",
+      "name": "양재국수 (가상)",
+      "category": "분식",
+      "lat": 37.4870,
+      "lng": 127.0350,
+      "address": "서울 서초구 양재동 인근 (가상)",
+      "openHour": 11,
+      "closeHour": 21,
+      "pickupAvailable": true,
+      "deliveryAvailable": false,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_003_1", "name": "잔치국수", "price": 7000, "cookMin": 6, "tags": ["국물", "빠름", "1인", "식사"] },
+        { "id": "m_003_2", "name": "비빔국수", "price": 7500, "cookMin": 6, "tags": ["매운", "빠름", "1인", "식사"] },
+        { "id": "m_003_3", "name": "김밥", "price": 4000, "cookMin": 4, "tags": ["빠름", "간식"] }
+      ]
+    },
+    {
+      "id": "store_004",
+      "name": "테헤란샐러드 (가상)",
+      "category": "샐러드",
+      "lat": 37.4985,
+      "lng": 127.0265,
+      "address": "서울 강남구 강남역 인근 (가상)",
+      "openHour": 8,
+      "closeHour": 20,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_004_1", "name": "닭가슴살 샐러드", "price": 9900, "cookMin": 5, "tags": ["가벼움", "1인", "식사"] },
+        { "id": "m_004_2", "name": "연어 포케", "price": 12900, "cookMin": 7, "tags": ["가벼움", "1인", "식사"] },
+        { "id": "m_004_3", "name": "아메리카노", "price": 3500, "cookMin": 2, "tags": ["음료", "빠름"] }
+      ]
+    },
+    {
+      "id": "store_005",
+      "name": "서초치킨공방 (가상)",
+      "category": "치킨",
+      "lat": 37.4930,
+      "lng": 127.0320,
+      "address": "서울 서초구 서초동 인근 (가상)",
+      "openHour": 15,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_005_1", "name": "후라이드 치킨", "price": 19000, "cookMin": 20, "tags": ["여럿", "야식"] },
+        { "id": "m_005_2", "name": "양념 치킨", "price": 20000, "cookMin": 20, "tags": ["여럿", "매운", "야식"] },
+        { "id": "m_005_3", "name": "치킨 반반", "price": 20000, "cookMin": 20, "tags": ["여럿", "야식"] }
+      ]
+    }
+  ]
+}
