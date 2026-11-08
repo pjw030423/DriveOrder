@@ -1,6 +1,15 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+// release 서명 정보: 프로젝트 루트의 keystore.properties (git에 올리지 않음).
+// 파일이 없으면 release 빌드는 서명 없이 만들어짐.
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -10,7 +19,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.myapplication"
+        applicationId = "com.driveorder.app"
         minSdk = 28
         targetSdk = 37
         versionCode = 1
@@ -19,11 +28,24 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (keystoreProps.containsKey("storeFile")) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+            // R8 최적화 끔: kotlin.** 클래스를 줄이면, 최적화 범위 밖의 라이브러리(Pleos SDK 등)가
+            // 그 클래스를 상속하다 IllegalAccessError로 시작하자마자 종료됨 (2026-11-08 에뮬레이터에서 확인)
             optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                enable = false
             }
         }
     }

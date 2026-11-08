@@ -89,11 +89,19 @@ emulator -avd Pleos_Connect_v2.1.0 -no-snapshot-save -gpu swiftshader_indirect
 
 ### 2. 앱 설치
 
-Android Studio에서 실행하거나:
+**APK 파일 위치: [`apk/TEAMNAME_DriveOrder_release.apk`](apk/TEAMNAME_DriveOrder_release.apk)** (서명된 release 빌드, 패키지 `com.driveorder.app`)
+
+```bash
+adb install -g apk/TEAMNAME_DriveOrder_release.apk
+```
+
+소스에서 직접 실행하려면 Android Studio에서 실행하거나:
 
 ```bash
 ./gradlew installDebug
 ```
+
+release APK를 다시 만들려면 프로젝트 루트에 `keystore.properties`(storeFile, storePassword, keyAlias, keyPassword)를 두고 `./gradlew assembleRelease`를 실행합니다. 서명 키와 이 파일은 저장소에 올리지 않습니다.
 
 ### 3. 매장 웹 열기
 
@@ -170,7 +178,3 @@ firestore.rules              Firestore 보안 규칙
 - 탑승 인원에 맞춘 추천(Vehicle 착좌 정보)
 
 > Vehicle SDK 퍼미션은 Pleos App Market과 사전 협의·승인된 경우에만 선언할 수 있고, 승인되지 않은 퍼미션을 선언하면 심사를 통과할 수 없습니다([App Review Guidelines](https://document.pleos.ai/docs/pleos-only/distribute/app-review-guide/review-functionality-performance-stability)). 그래서 지금 앱은 Vehicle SDK를 포함하지 않으며, 위 두 항목은 승인 범위를 주최 측에 확인한 뒤 진행합니다.
-
----
-
-팀명 미정 · 영남대학교

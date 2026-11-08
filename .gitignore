@@ -16,3 +16,8 @@ local.properties
 .kotlin
 /.idea/deploymentTargetSelector.xml
 /.idea/deviceManager.xml
+
+# 제출용 접수양식(개인정보 포함), release 서명 정보
+/submission/
+keystore.properties
+*.jks
