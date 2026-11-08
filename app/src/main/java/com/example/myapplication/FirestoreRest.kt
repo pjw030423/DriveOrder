@@ -35,7 +35,10 @@ object FirestoreRest {
      */
     suspend fun patchFields(collection: String, id: String, data: JSONObject): Int =
         withContext(Dispatchers.IO) {
-            val mask = data.keys().asSequence().joinToString("&") { "updateMask.fieldPaths=$it" }
+            // currentDocument.exists=true: 문서가 없으면 404 (없으면 새로 만들어 버리는 기본 동작 방지 —
+            // 삭제된 주문이 etaAt·sendAt만 가진 깨진 문서로 되살아나던 문제, 2026-11-08 확인)
+            val mask = data.keys().asSequence().joinToString("&") { "updateMask.fieldPaths=$it" } +
+                "&currentDocument.exists=true"
             val body = JSONObject().put("fields", toFields(data)).toString()
             request("POST", "$BASE/$collection/$id?$mask", body, methodOverride = "PATCH").first
         }

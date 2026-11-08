@@ -21,9 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -89,6 +87,10 @@ class MainActivity : ComponentActivity() {
     @Volatile private var sttReady = false
     private var listenAfterSpeak = false              // 안내를 다 읽은 뒤 바로 들을지
     private val voiceDialog = VoiceDialog { tags -> computeRecs(tags, limit = 10) }
+
+    // 데모용 가상 주행 (DemoDrive.kt 참고)
+    private val demoDrive = DemoDrive()
+    private var demoOn by mutableStateOf(false)
     private var voiceStatus by mutableStateOf("")
     private var voiceLog by mutableStateOf("")
 
@@ -166,6 +168,8 @@ class MainActivity : ComponentActivity() {
             }
             Log.d(TAG, "경유지 ${waypointInfoList.size}개, 매장 경유지: ${wp?.remainTime}초 / ${wp?.remainDistance}m")
             if (wp == null) return
+            // 처음 받은 경유지 ETA부터 데모 주행을 다시 시작 (그 전 값은 위치 비율로 추정한 값이라 부정확)
+            if (waypointRemainSec == null) demoDrive.reset()
             waypointRemainSec = wp.remainTime.toLong()
             rescheduleOrder(wp.remainTime.toLong())
         }
@@ -207,18 +211,19 @@ class MainActivity : ComponentActivity() {
 
         initVoice()
 
-        // 1단계: 화면이 보이는 동안 5초마다 남은 시간 자동 조회
+        // 5초마다 남은 시간·경유지 ETA·주문 상태 조회.
+        // 화면이 가려져도 계속 돌아야 함: 경유지를 추가하면 내비가 앞으로 나와 이 앱은 백그라운드가 되는데,
+        // 예전처럼 STARTED 동안만 돌면 주행 중 재계산·상태 동기화가 멈춤 (2026-11-08 에뮬레이터에서 확인).
+        // 앱(Activity)이 종료될 때 lifecycleScope와 함께 멈춤.
         lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (true) {
-                    if (connected && routeActive) {
-                        naviHelper.getDestinationInfo()
-                        naviHelper.getCurrentLocationInfo()
-                    }
-                    if (connected && waypointAdded) naviHelper.getWaypointInfo()
-                    syncOrderStatus()
-                    delay(POLL_MS)
+            while (true) {
+                if (connected && routeActive) {
+                    naviHelper.getDestinationInfo()
+                    naviHelper.getCurrentLocationInfo()
                 }
+                if (connected && waypointAdded) naviHelper.getWaypointInfo()
+                syncOrderStatus()
+                delay(POLL_MS)
             }
         }
 
@@ -303,8 +308,19 @@ class MainActivity : ComponentActivity() {
                             waypointAdded = false
                             waypointRemainSec = null
                             order = null
+                            OrderTrackingService.stop(this@MainActivity)
                             orderText = ""
                         }) { Text("주문 화면 닫기 + 경유지 삭제 (테스트용)") }
+                    }
+                    // 데모용 가상 주행: 에뮬레이터는 차가 움직이지 않아 남은 시간이 줄지 않음
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { demoDrive.toggle(); demoOn = demoDrive.enabled }) {
+                            Text(if (demoOn) "데모 주행: 켜짐 (가상)" else "데모 주행: 꺼짐")
+                        }
+                        if (demoOn) Button(onClick = { demoDrive.addDelay(180); Log.d(TAG, "데모: 정체 +3분") }) {
+                            Text("정체 +3분")
+                        }
                     }
                 }
             }
@@ -510,7 +526,9 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "주문 생성 ${newOrder.id}: 도착 ${rec.arriveSec}초 뒤, 조리 ${rec.menu.cookMin}분")
             order = newOrder
             waypointRemainSec = null
+            demoDrive.reset()
             addStoreWaypoint(newOrder)
+            OrderTrackingService.start(this@MainActivity, "${newOrder.storeName} · ${newOrder.menuName}: 도착 시간에 맞춰 주문 전달 중")
             renderOrder()
         } catch (e: Exception) {
             Log.e(TAG, "주문 실패", e)
@@ -550,7 +568,9 @@ class MainActivity : ComponentActivity() {
     private fun rescheduleOrder(storeRemainSec: Long?) {
         if (storeRemainSec == null) return
         val current = order ?: return
-        val updated = OrderScheduler.reschedule(current, System.currentTimeMillis(), storeRemainSec) ?: return
+        val now = System.currentTimeMillis()
+        val remain = demoDrive.remain(storeRemainSec, now)   // 데모 주행이 켜져 있으면 가상 주행 기준
+        val updated = OrderScheduler.reschedule(current, now, remain) ?: return
         lifecycleScope.launch {
             try {
                 FirestoreRest.patchFields(
@@ -570,14 +590,27 @@ class MainActivity : ComponentActivity() {
         val current = order ?: return
         try {
             val now = System.currentTimeMillis()
-            var status = FirestoreRest.getDocument("orders", current.id)
-                ?.optString("status", current.status) ?: current.status
+            val doc = FirestoreRest.getDocument("orders", current.id)
+            if (doc == null) {
+                // 서버에서 주문이 삭제됨(매장 취소·테스트 정리 등) → 차에서도 주문을 내려놓음
+                Log.d(TAG, "주문이 서버에서 삭제됨: ${current.id}")
+                if (waypointAdded) naviHelper.removeWaypoint(WaypointIndex.FIRST)
+                waypointAdded = false
+                waypointRemainSec = null
+                order = null
+                OrderTrackingService.stop(this)
+                orderText = "주문이 취소되었어요 (매장에서 삭제됨)"
+                return
+            }
+            var status = doc.optString("status", current.status)
             if (status == Order.STATUS_SCHEDULED && now >= current.sendAt) {
                 FirestoreRest.patchFields("orders", current.id, JSONObject().put("status", Order.STATUS_SENT))
                 status = Order.STATUS_SENT
                 Log.d(TAG, "🔔 매장에 주문 전송: ${current.id}")
             }
+            if (status != current.status) Log.d(TAG, "주문 상태 변경: ${current.status} → $status")
             if (order?.id == current.id) order = order!!.copy(status = status)
+            if (status == Order.STATUS_PICKED_UP) OrderTrackingService.stop(this)   // 픽업 완료 → 서비스 종료
         } catch (e: Exception) {
             Log.e(TAG, "주문 상태 조회 실패", e)
         }
@@ -604,6 +637,7 @@ class MainActivity : ComponentActivity() {
         naviHelper.release()
         stt?.let { it.removeListener(sttListener); it.release() }
         tts?.let { it.removeEventListener(ttsListener); it.release() }
+        OrderTrackingService.stop(this)
         super.onDestroy()
     }
 }

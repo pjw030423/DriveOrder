@@ -171,8 +171,11 @@ function render() {
 
 async function poll() {
   try {
-    orders = await listAll("orders");
-    orders.forEach(o => { if (!(o.id in firstEta)) firstEta[o.id] = o.etaAt; });
+    // 필수 필드가 없는 깨진 문서는 무시
+    orders = (await listAll("orders")).filter(o => o.id && o.menuName && o.status && o.etaAt && o.sendAt);
+    // 지연은 매장에 주문이 보이기 시작한 시점(sendAt 이후)의 도착 예정 기준으로 계산
+    const now = Date.now();
+    orders.forEach(o => { if (!(o.id in firstEta) && o.sendAt <= now) firstEta[o.id] = o.etaAt; });
     showErr("");
   } catch (e) { showErr("주문 불러오기 실패: " + e.message); }
   render();
