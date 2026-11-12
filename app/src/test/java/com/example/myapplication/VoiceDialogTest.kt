@@ -22,8 +22,12 @@ class VoiceDialogTest {
 
     /** 태그가 맞는 메뉴만 돌려주는 가짜 추천기 */
     private val all = listOf(rec(jjigae, 0), rec(jjigae, 1), rec(chicken, 0))
-    private fun fakeRecommend(tags: Set<String>) =
-        if (tags.isEmpty()) all else all.filter { r -> r.menu.tags.any { it in tags } }
+    /** 배달 후보: 목적지 근처 치킨집 (조리 20분 + 배달 5분) */
+    private val deliveryAll = listOf(Recommendation(chicken, chicken.menus[0], 600, 1500, 0.0, delivery = true, deliveryMin = 5))
+    private fun fakeRecommend(tags: Set<String>, delivery: Boolean): List<Recommendation> {
+        val list = if (delivery) deliveryAll else all
+        return if (tags.isEmpty()) list else list.filter { r -> r.menu.tags.any { it in tags } }
+    }
 
     private fun dialog() = VoiceDialog(::fakeRecommend)
 
@@ -88,11 +92,59 @@ class VoiceDialogTest {
 
     @Test
     fun 경로가_없으면_안내하고_끝낸다() {
-        val d = VoiceDialog { null }
+        val d = VoiceDialog { _, _ -> null }
         d.start()
         val r = d.handle("아무거나")
         assertTrue(r.say.contains("목적지"))
         assertFalse(d.isActive)
+    }
+
+    @Test
+    fun 배달로_요청하면_배달_메뉴를_제안하고_배달로_주문() {
+        val d = dialog()
+        d.start()
+        val proposal = d.handle("배달로 치킨 시켜줘")
+        assertTrue(proposal.say.contains("배달"))
+        assertTrue(proposal.say.contains("후라이드 치킨"))
+        val done = d.handle("네")
+        assertTrue(done.order!!.delivery)
+        assertTrue(done.say.contains("배달 주문"))
+        assertFalse(done.say.contains("경유지"))
+    }
+
+    @Test
+    fun 가는_길에_없고_방식을_안_정했으면_배달로_제안() {
+        val d = VoiceDialog { _, delivery -> if (delivery) deliveryAll else emptyList() }
+        d.start()
+        val proposal = d.handle("치킨")
+        assertTrue(proposal.say.startsWith("가는 길에는 없지만 목적지로 배달할 수 있어요"))
+        assertTrue(d.handle("응").order!!.delivery)
+    }
+
+    @Test
+    fun 픽업이라고_정했으면_배달로_바꾸지_않는다() {
+        val d = VoiceDialog { _, delivery -> if (delivery) deliveryAll else emptyList() }
+        d.start()
+        val r = d.handle("포장으로 치킨")
+        assertNull(r.order)
+        assertTrue(r.say.contains("가는 길"))
+    }
+
+    @Test
+    fun 픽업_제안_중에_배달로_바꿀_수_있다() {
+        val d = dialog()
+        d.start()
+        assertFalse(d.handle("치킨").say.contains("배달"))
+        val again = d.handle("아니 배달로 해줘")
+        assertTrue(again.say.contains("배달로 주문할까요"))
+        assertTrue(d.handle("네").order!!.delivery)
+    }
+
+    @Test
+    fun 픽업_배달_판별() {
+        assertEquals(VoiceParser.Mode.DELIVERY, VoiceParser.mode("집으로 보내 줘"))
+        assertEquals(VoiceParser.Mode.PICKUP, VoiceParser.mode("포장할게"))
+        assertNull(VoiceParser.mode("치킨"))
     }
 
     @Test

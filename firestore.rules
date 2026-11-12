@@ -15,6 +15,7 @@ rules_version = '2';
 // 앱이 실제로 하는 쓰기 (이것만 허용)
 //  1. stores      : 쓰기 금지. 매장 데이터는 규칙 적용 전에 앱의 "③ 업로드"로 올리거나 콘솔에서 수정.
 //  2. orders 생성 : 차량 앱 placeOrder()  — status = "scheduled", 필수 필드 전부
+//                   (+ type 'pickup'|'delivery', deliveryMin, deliveryTo — 배달 주문용)
 //  3. orders 수정 : 차량 앱 rescheduleOrder() — etaAt, sendAt 만
 //  4. orders 수정 : 차량 앱 syncOrderStatus() — status: scheduled → sent
 //  5. orders 수정 : 매장 웹 setStatus()      — status: scheduled/sent → cooking → ready → picked_up
@@ -64,7 +65,8 @@ service cloud.firestore {
       return o.keys().hasAll(['id', 'storeId', 'storeName', 'storeLat', 'storeLng', 'menuName',
                               'price', 'cookMin', 'createdAt', 'etaAt', 'sendAt', 'status'])
           && o.keys().hasOnly(['id', 'storeId', 'storeName', 'storeLat', 'storeLng', 'menuName',
-                               'price', 'cookMin', 'createdAt', 'etaAt', 'sendAt', 'status'])
+                               'price', 'cookMin', 'createdAt', 'etaAt', 'sendAt', 'status',
+                               'type', 'deliveryMin', 'deliveryTo'])
           && o.storeId is string && exists(/databases/$(database)/documents/stores/$(o.storeId))
           && o.menuName is string && o.menuName.size() > 0 && o.menuName.size() <= 50
           && o.storeName is string && o.storeName.size() <= 50
@@ -72,7 +74,11 @@ service cloud.firestore {
           && o.cookMin is int && o.cookMin > 0 && o.cookMin <= 120
           && o.storeLat is number && o.storeLng is number
           && o.createdAt is int && o.etaAt is int && o.sendAt is int
-          && o.sendAt <= o.etaAt;
+          && o.sendAt <= o.etaAt
+          // 픽업/배달 (type이 없는 예전 주문은 픽업으로 봄)
+          && (!('type' in o) || o.type in ['pickup', 'delivery'])
+          && (!('deliveryMin' in o) || (o.deliveryMin is int && o.deliveryMin >= 0 && o.deliveryMin <= 60))
+          && (!('deliveryTo' in o) || (o.deliveryTo is string && o.deliveryTo.size() <= 100));
     }
   }
 }

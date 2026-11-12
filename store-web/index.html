@@ -31,6 +31,9 @@
   .card .meta { color:var(--muted); font-size:14px; }
   .card .eta { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; margin:6px 0; }
   .card .delay { color:var(--warn); font-weight:600; font-size:14px; }
+  .card .kind { display:inline-block; font-size:13px; font-weight:700; padding:1px 8px; border-radius:999px; margin-bottom:4px;
+                background:var(--line); }
+  .card .kind.delivery { background:#fef3c7; color:#92400e; }
   .card.late .eta { color:var(--warn); }
   button { font:inherit; font-weight:600; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; color:#fff; background:var(--accent); }
   button.ok { background:var(--ok); }
@@ -49,7 +52,7 @@
 <main>
   <section><h2>접수 대기 (지금 조리 시작)</h2><div id="col-new"></div></section>
   <section><h2>조리 중</h2><div id="col-cooking"></div></section>
-  <section><h2>조리 완료 · 픽업 대기</h2><div id="col-ready"></div></section>
+  <section><h2>조리 완료 · 픽업 대기 / 배달 중</h2><div id="col-ready"></div></section>
   <section class="upcoming"><h2>예약됨 (전송 전 · 참고용)</h2><div id="col-upcoming"></div></section>
 </main>
 <script>
@@ -105,14 +108,17 @@ function card(o, now) {
   el.className = "card";
   const untilEta = o.etaAt - now;
   const delay = o.etaAt - (firstEta[o.id] ?? o.etaAt);
-  if (o.status === "cooking" && untilEta < 0) el.classList.add("late");
+  if (o.status === "cooking" && untilEta - (o.deliveryMin || 0) * 60000 < 0) el.classList.add("late");
+  const delivery = o.type === "delivery";
   el.innerHTML = `
+    <div class="kind${delivery ? " delivery" : ""}"></div>
     <div class="menu"></div>
     <div class="meta"></div>
     <div class="eta"></div>
     ${Math.abs(delay) >= 60000 ? `<div class="delay">⏱ 도착 ${delay > 0 ? fmtMin(delay) + " 지연" : fmtMin(-delay) + " 빨라짐"}</div>` : ""}
   `;
   el.dataset.id = o.id;
+  el.querySelector(".kind").textContent = delivery ? `🛵 배달 → ${o.deliveryTo || "고객 목적지"} (이동 ${o.deliveryMin}분)` : "🛍️ 픽업 (고객이 들름)";
   el.querySelector(".menu").textContent = `${o.menuName} · ${won(o.price)}`;
   el.querySelector(".meta").textContent = `${o.storeName} · 조리 ${o.cookMin}분 · ${o.id}`;
   el.querySelector(".eta").textContent = etaText(o, now);
@@ -124,13 +130,19 @@ function card(o, now) {
   if (o.status === "scheduled" || o.status === "sent") {
     if (o.sendAt <= now) btn("조리 시작", "cooking");
   } else if (o.status === "cooking") btn("조리 완료", "ready", "ok");
-  else if (o.status === "ready") btn("픽업 완료", "picked_up", "ok");
+  else if (o.status === "ready") btn(delivery ? "배달 완료" : "픽업 완료", "picked_up", "ok");
   return el;
 }
 
 function etaText(o, now) {
   if ((o.status === "scheduled" || o.status === "sent") && o.sendAt > now) return `${fmtMin(o.sendAt - now)} 뒤 접수`;
   const untilEta = o.etaAt - now;
+  if (o.type === "delivery") {
+    // 배달: 고객이 목적지에 도착하는 시각(etaAt)에 맞춰 출발해야 함
+    if (o.status === "ready") return untilEta > 0 ? `고객 목적지 도착 ${fmtMin(untilEta)} 전` : "고객 목적지 도착!";
+    const untilDepart = untilEta - (o.deliveryMin || 0) * 60000;
+    return untilDepart > 0 ? `배달 출발 ${fmtMin(untilDepart)} 전` : "지금 배달 출발!";
+  }
   return untilEta > 0 ? `고객 도착 ${fmtMin(untilEta)} 전` : "고객 도착!";
 }
 

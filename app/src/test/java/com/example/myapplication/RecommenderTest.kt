@@ -70,4 +70,39 @@ class RecommenderTest {
         val r = Recommender.recommend(stores + far, curLat, curLng, destLat, destLng, 1260, 12, setOf("국물"), 10)
         assertFalse(r.any { it.store.id == "far" })
     }
+
+    // ---------- 배달 ----------
+
+    private fun delivery(remainSec: Long, hour: Int, tags: Set<String> = emptySet()) =
+        Recommender.recommendDelivery(stores, destLat, destLng, remainSec, hour, tags, limit = 10)
+
+    @Test
+    fun 배달은_목적지_근처_배달가능_매장만_추천하고_경로와_무관() {
+        val r = delivery(remainSec = 1620, hour = 18)
+        assertTrue(r.all { it.delivery })
+        assertFalse(r.any { it.store.id == "store_003" })     // 배달 불가 매장
+        assertTrue(r.any { it.store.id == "store_005" })      // 픽업으로는 시간 부족했던 치킨도 배달은 가능
+    }
+
+    @Test
+    fun 배달은_조리와_배달_이동을_합쳐_도착_전에_끝나야_한다() {
+        val chicken = delivery(remainSec = 1620, hour = 18).first { it.store.id == "store_005" }
+        assertTrue(chicken.prepSec <= 1620)
+        assertEquals(chicken.prepSec, (20 + chicken.deliveryMin) * 60L)
+        // 목적지까지 20분이면 조리 20분 + 배달 시간을 못 맞춤 → 제외
+        assertFalse(delivery(remainSec = 1200, hour = 18).any { it.store.id == "store_005" })
+    }
+
+    @Test
+    fun 배달_이동_시간은_준비_3분과_거리를_올림해_더한다() {
+        assertEquals(3, Recommender.deliveryMinutes(0.0))
+        assertEquals(4, Recommender.deliveryMinutes(333.0))
+        assertEquals(5, Recommender.deliveryMinutes(334.0))
+    }
+
+    @Test
+    fun 목적지에서_3km_넘는_매장은_배달하지_않는다() {
+        val far = Store("far", "먼집", "한식", 37.53, 127.0276, 0, 24, true, true, listOf(menu("x", "국밥", 9000, 5, "국물")))
+        assertTrue(Recommender.recommendDelivery(listOf(far), destLat, destLng, 3600, 12).isEmpty())
+    }
 }

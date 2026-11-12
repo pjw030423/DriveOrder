@@ -86,7 +86,8 @@ class MainActivity : ComponentActivity() {
     @Volatile private var ttsReady = false
     @Volatile private var sttReady = false
     private var listenAfterSpeak = false              // 안내를 다 읽은 뒤 바로 들을지
-    private val voiceDialog = VoiceDialog { tags -> computeRecs(tags, limit = 10) }
+    private val voiceDialog = VoiceDialog { tags, delivery -> computeRecs(tags, limit = 10, delivery = delivery) }
+    private var deliveryMode by mutableStateOf(false)  // ⑤ 추천 버튼의 주문 방식 (false=픽업)
 
     // 데모용 가상 주행 (DemoDrive.kt 참고)
     private val demoDrive = DemoDrive()
@@ -99,6 +100,7 @@ class MainActivity : ComponentActivity() {
     private var curLng: Double? = null
     private var destLat: Double? = null
     private var destLng: Double? = null
+    private var destName: String = ""           // 배달 받을 곳으로 매장에 보냄
     private var lastRemainSec: Long? = null
     private var stores: List<Store> = emptyList()
 
@@ -140,6 +142,7 @@ class MainActivity : ComponentActivity() {
             // 4단계 추천용으로 목적지 좌표와 남은 시간 저장
             destLat = destinationInfo.latitude.toString().toDoubleOrNull()
             destLng = destinationInfo.longitude.toString().toDoubleOrNull()
+            destName = destinationInfo.name.toString()
             lastRemainSec = if (noRoute) null else remain
 
             val newPlan = when {
@@ -149,9 +152,13 @@ class MainActivity : ComponentActivity() {
             }
             runOnUiThread { plan = newPlan }
 
-            // 5단계: 주문이 있으면 새 ETA로 매장 도착·전송 시각 재계산
-            // (매장이 경유지로 잡히기 전까지만 위치 비율로 추정 → 이후엔 내비의 경유지 ETA 사용)
-            if (!noRoute && remain != null && waypointRemainSec == null) rescheduleOrder(estimateStoreRemain(remain))
+            // 5단계: 주문이 있으면 새 ETA로 도착·전송 시각 재계산
+            //  - 배달: 목적지 도착 시각이 기준 → 목적지 ETA를 그대로 사용
+            //  - 픽업: 매장이 경유지로 잡히기 전까지만 위치 비율로 추정 → 이후엔 내비의 경유지 ETA 사용
+            if (!noRoute && remain != null) {
+                if (order?.isDelivery == true) rescheduleOrder(remain)
+                else if (waypointRemainSec == null) rescheduleOrder(estimateStoreRemain(remain))
+            }
         }
 
         // 6단계: 경유지 추가/삭제 결과 → 경유지 정보(남은 시간) 요청
@@ -162,7 +169,7 @@ class MainActivity : ComponentActivity() {
 
         // 6단계: 경유지 목록 수신 → 주문 매장과 같은 위치의 경유지 ETA로 전송 시각 재계산
         override fun onWayPointInfo(waypointInfoList: List<WaypointInfo>) {
-            val current = order ?: return
+            val current = order?.takeUnless { it.isDelivery } ?: return   // 배달은 경유지 없음
             val wp = waypointInfoList.firstOrNull {
                 PickupWaypoint.matches(it.name, it.latitude, it.longitude, current.storeName, current.storeLat, current.storeLng)
             }
@@ -237,7 +244,7 @@ class MainActivity : ComponentActivity() {
                     // 7단계: 음성 주문. 마이크가 안 되는 환경(에뮬레이터 등)을 위해 같은 문장을 버튼으로도 입력
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { startVoiceOrder() }) { Text("🎤 음성 주문", fontSize = 22.sp) }
-                        listOf("국물 있는 거", "치킨", "네", "아니요", "취소").forEach { say ->
+                        listOf("국물 있는 거", "치킨", "배달로 받을래", "네", "아니요", "취소").forEach { say ->
                             Button(onClick = { handleVoice(say) }) {
                                 Text("\"$say\"")
                             }
@@ -282,6 +289,9 @@ class MainActivity : ComponentActivity() {
                         Button(onClick = { recommend(emptySet()) }) { Text("⑤ 추천: 아무거나") }
                         Button(onClick = { recommend(setOf("국물")) }) { Text("국물") }
                         Button(onClick = { recommend(setOf("빠름")) }) { Text("빠른 것") }
+                        Button(onClick = { deliveryMode = !deliveryMode; recs = emptyList(); recText = "" }) {
+                            Text(if (deliveryMode) "방식: 🛵 목적지 배달" else "방식: 🛍️ 가는 길 픽업")
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     // 데모 시각 전환: 현재 → 점심 12시 → 저녁 18시 → 현재 …
@@ -373,7 +383,7 @@ class MainActivity : ComponentActivity() {
                 stores = FirestoreRest.listDocuments("stores").map { storeFromJson(it) }
             }
             val remain = lastRemainSec
-            val recs = computeRecs(tags)
+            val recs = computeRecs(tags, delivery = deliveryMode)
             if (remain == null || recs == null) {
                 recText = "⚠️ 경로 정보가 없습니다. 내비에 목적지를 설정하고 ② 버튼을 먼저 누르세요."
                 return@launch
@@ -381,13 +391,17 @@ class MainActivity : ComponentActivity() {
             val hour = currentHour()
             this@MainActivity.recs = recs
             val timeLabel = if (demoHour != null) "데모 ${hour}시" else "현재 ${hour}시"
-            val header = "$timeLabel · 목적지까지 ${remain / 60}분 · 조건 ${if (tags.isEmpty()) "없음" else tags.joinToString()}"
+            val modeLabel = if (deliveryMode) "목적지 배달" else "가는 길 픽업"
+            val header = "$timeLabel · $modeLabel · 목적지까지 ${remain / 60}분 · 조건 ${if (tags.isEmpty()) "없음" else tags.joinToString()}"
             val body = if (recs.isEmpty()) {
-                "조건에 맞는 메뉴가 없습니다 (영업시간·조리시간·경로 확인)"
+                "조건에 맞는 메뉴가 없습니다 (영업시간·조리시간·${if (deliveryMode) "배달 거리" else "경로"} 확인)"
             } else {
                 recs.mapIndexed { i, r ->
-                    "${i + 1}. ${r.store.name} · ${r.menu.name} ${"%,d".format(r.menu.price)}원\n" +
-                    "    경로에서 ${r.detourM}m · 매장까지 약 ${r.arriveSec / 60}분 · 조리 ${r.menu.cookMin}분 (여유 ${r.slackSec / 60}분)"
+                    val line2 = if (r.delivery)
+                        "    목적지에서 ${r.detourM}m · 조리 ${r.menu.cookMin}분 + 배달 ${r.deliveryMin}분 (여유 ${r.slackSec / 60}분)"
+                    else
+                        "    경로에서 ${r.detourM}m · 매장까지 약 ${r.arriveSec / 60}분 · 조리 ${r.menu.cookMin}분 (여유 ${r.slackSec / 60}분)"
+                    "${i + 1}. ${r.store.name} · ${r.menu.name} ${"%,d".format(r.menu.price)}원\n$line2"
                 }.joinToString("\n")
             }
             val note = if (curLat == null) "\n(현재 위치 미수신: 기본 위치 42dot 기준으로 계산)" else ""
@@ -403,10 +417,11 @@ class MainActivity : ComponentActivity() {
         ?: Calendar.getInstance(TimeZone.getTimeZone("Asia/Seoul")).get(Calendar.HOUR_OF_DAY)
 
     /** 현재 경로·시각 기준 추천 (매장 목록은 미리 불러와 있어야 함). 경로 정보가 없으면 null */
-    private fun computeRecs(tags: Set<String>, limit: Int = 3): List<Recommendation>? {
+    private fun computeRecs(tags: Set<String>, limit: Int = 3, delivery: Boolean = false): List<Recommendation>? {
         val remain = lastRemainSec ?: return null
         val dLat = destLat ?: return null
         val dLng = destLng ?: return null
+        if (delivery) return Recommender.recommendDelivery(stores, dLat, dLng, remain, currentHour(), tags, limit)
         return Recommender.recommend(
             stores, curLat ?: DEFAULT_LAT, curLng ?: DEFAULT_LNG, dLat, dLng, remain, currentHour(), tags, limit
         )
@@ -518,17 +533,18 @@ class MainActivity : ComponentActivity() {
 
     // 5단계: 추천 메뉴로 주문 생성 → Firestore "orders"에 저장 (매장 웹은 sendAt이 지나면 표시)
     private fun placeOrder(rec: Recommendation) = lifecycleScope.launch {
-        val newOrder = Order.create(rec, System.currentTimeMillis())
+        val newOrder = Order.create(rec, System.currentTimeMillis(), deliveryTo = destName)
         orderText = "주문 저장 중..."
         try {
             val code = FirestoreRest.putDocument("orders", newOrder.id, newOrder.toJson())
             check(code in 200..299) { "HTTP $code" }
-            Log.d(TAG, "주문 생성 ${newOrder.id}: 도착 ${rec.arriveSec}초 뒤, 조리 ${rec.menu.cookMin}분")
+            Log.d(TAG, "주문 생성 ${newOrder.id} (${newOrder.type}): 도착 ${rec.arriveSec}초 뒤, 조리 ${rec.menu.cookMin}분, 배달 ${rec.deliveryMin}분")
             order = newOrder
             waypointRemainSec = null
             demoDrive.reset()
-            addStoreWaypoint(newOrder)
-            OrderTrackingService.start(this@MainActivity, "${newOrder.storeName} · ${newOrder.menuName}: 도착 시간에 맞춰 주문 전달 중")
+            if (!newOrder.isDelivery) addStoreWaypoint(newOrder)   // 배달은 경로를 바꾸지 않음
+            val what = if (newOrder.isDelivery) "목적지 도착에 맞춰 배달 요청 중" else "도착 시간에 맞춰 주문 전달 중"
+            OrderTrackingService.start(this@MainActivity, "${newOrder.storeName} · ${newOrder.menuName}: $what")
             renderOrder()
         } catch (e: Exception) {
             Log.e(TAG, "주문 실패", e)
@@ -610,7 +626,7 @@ class MainActivity : ComponentActivity() {
             }
             if (status != current.status) Log.d(TAG, "주문 상태 변경: ${current.status} → $status")
             if (order?.id == current.id) order = order!!.copy(status = status)
-            if (status == Order.STATUS_PICKED_UP) OrderTrackingService.stop(this)   // 픽업 완료 → 서비스 종료
+            if (status == Order.STATUS_PICKED_UP) OrderTrackingService.stop(this)   // 픽업·배달 완료 → 서비스 종료
         } catch (e: Exception) {
             Log.e(TAG, "주문 상태 조회 실패", e)
         }
@@ -624,9 +640,14 @@ class MainActivity : ComponentActivity() {
         val etaIn = ((o.etaAt - now) / 1000).coerceAtLeast(0)
         val sendLine = if (o.status == Order.STATUS_SCHEDULED && sendIn > 0)
             "매장 전송까지 ${sendIn / 60}분 ${sendIn % 60}초" else "매장에 전송됨"
-        orderText = "🧾 ${o.storeName} · ${o.menuName} ${"%,d".format(o.price)}원\n" +
-            "상태: ${Order.statusLabel(o.status)}\n" +
-            "$sendLine · 매장 도착 약 ${etaIn / 60}분 ${etaIn % 60}초 뒤 (조리 ${o.cookMin}분)"
+        val kind = if (o.isDelivery) "🛵 배달 → ${o.deliveryTo}" else "🛍️ 픽업"
+        val etaLine = if (o.isDelivery)
+            "목적지 도착 약 ${etaIn / 60}분 ${etaIn % 60}초 뒤 (조리 ${o.cookMin}분 + 배달 ${o.deliveryMin}분)"
+        else
+            "매장 도착 약 ${etaIn / 60}분 ${etaIn % 60}초 뒤 (조리 ${o.cookMin}분)"
+        orderText = "🧾 $kind · ${o.storeName} · ${o.menuName} ${"%,d".format(o.price)}원\n" +
+            "상태: ${Order.statusLabel(o.status, o.isDelivery)}\n" +
+            "$sendLine · $etaLine"
     }
 
     // SDK 콜백은 다른 스레드에서 올 수 있으므로 화면 갱신은 UI 스레드에서

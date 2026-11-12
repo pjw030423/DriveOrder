@@ -27,4 +27,15 @@ class OrderSchedulerTest {
         val after = OrderScheduler.secondsUntilSend(remainSec = 1200, cookSec = 600)
         assertTrue(after > before)
     }
+
+    @Test
+    fun 배달_주문은_조리와_배달_시간을_빼고_보내고_다시_계산할_때도_같다() {
+        val now = 1_000_000L
+        val o = Order("o", "s", "매장", 0.0, 0.0, "치킨", 19000, cookMin = 20, createdAt = now,
+            etaAt = now, sendAt = now, type = Order.TYPE_DELIVERY, deliveryMin = 5)
+        assertEquals(25 * 60L, o.prepSec)
+        val updated = OrderScheduler.reschedule(o.copy(sendAt = now + 1), now, 1800)!!
+        assertEquals(now + 1800 * 1000, updated.etaAt)
+        assertEquals(now + (1800 - 25 * 60 - 30) * 1000, updated.sendAt)
+    }
 }

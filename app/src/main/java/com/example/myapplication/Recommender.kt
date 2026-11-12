@@ -1,5 +1,6 @@
 package com.example.myapplication
 
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -31,12 +32,17 @@ data class Store(
 data class Recommendation(
     val store: Store,
     val menu: Menu,
-    val detourM: Int,      // 가는 길(직선 경로)에서 벗어난 거리(m)
-    val arriveSec: Long,   // 매장 도착까지 예상 시간(초)
-    val score: Double
+    val detourM: Int,      // 픽업: 가는 길(직선 경로)에서 벗어난 거리(m) / 배달: 매장~목적지 거리(m)
+    val arriveSec: Long,   // 픽업: 매장 도착까지 / 배달: 목적지 도착까지 예상 시간(초)
+    val score: Double,
+    val delivery: Boolean = false,
+    val deliveryMin: Int = 0   // 배달: 매장 → 목적지 이동 시간(분)
 ) {
-    /** 조리가 끝난 뒤 도착까지 남는 여유(초). 0 이상이어야 도착 시 음식이 준비됨 */
-    val slackSec: Long get() = arriveSec - menu.cookMin * 60L
+    /** 준비 시간(초): 조리 + (배달이면) 배달 이동 */
+    val prepSec: Long get() = (menu.cookMin + deliveryMin) * 60L
+
+    /** 준비가 끝난 뒤 도착까지 남는 여유(초). 0 이상이어야 도착 시 음식을 받을 수 있음 */
+    val slackSec: Long get() = arriveSec - prepSec
 }
 
 /**
@@ -49,6 +55,11 @@ data class Recommendation(
  *  ③ 가는 길에 있는가      현재 위치→목적지 직선에서 MAX_DETOUR_M 이내
  *  ④ 도착 전 조리 가능한가  조리 시간 ≤ 매장 도착까지 걸리는 시간   ← 핵심
  *  ⑤ 원하는 맛인가        tags 일치 (원하는 태그가 있을 때만)
+ *
+ * 배달(recommendDelivery)은 ②③④가 바뀜
+ *  ② 배달 가능한가        deliveryAvailable
+ *  ③ 목적지 근처인가      목적지에서 MAX_DELIVERY_M 이내 (경로와 무관 → 경유지 없음)
+ *  ④ 도착 전 받을 수 있나  조리 + 배달 이동 ≤ 목적지 도착까지 걸리는 시간
  */
 object Recommender {
 
@@ -86,6 +97,49 @@ object Recommender {
                 // 점수: 원하는 맛이 많이 맞을수록 ↑, 경로에서 멀수록 ↓
                 val score = matches * 10.0 - detour / 100.0
                 results += Recommendation(store, menu, detour.roundToInt(), arriveSec, score)
+            }
+        }
+        return results
+            .sortedWith(compareByDescending<Recommendation> { it.score }.thenBy { it.menu.price })
+            .take(limit)
+    }
+
+    /** 목적지에서 이만큼(m)까지의 매장만 배달 */
+    const val MAX_DELIVERY_M = 3000.0
+
+    /** 배달 이동 속도(m/분): 도심 오토바이 약 20km/h */
+    const val DELIVERY_M_PER_MIN = 333.0
+
+    /** 배달 출발 준비(포장·배차) 시간(분) */
+    const val DELIVERY_HANDOFF_MIN = 3
+
+    /** 매장 → 목적지 배달 이동 시간(분) 추정: 준비 + 직선거리 ÷ 속도 (올림) */
+    fun deliveryMinutes(distanceM: Double): Int =
+        DELIVERY_HANDOFF_MIN + ceil(distanceM / DELIVERY_M_PER_MIN).toInt()
+
+    /** 목적지 근처 매장에서 "도착할 때 맞춰 배달되는" 메뉴 추천 */
+    fun recommendDelivery(
+        stores: List<Store>,
+        destLat: Double, destLng: Double,    // 목적지 (배달 받을 곳)
+        remainSec: Long,                     // 목적지까지 남은 시간(초, 내비 ETA)
+        hour: Int,
+        wantedTags: Set<String> = emptySet(),
+        limit: Int = 3
+    ): List<Recommendation> {
+        val results = mutableListOf<Recommendation>()
+        for (store in stores) {
+            if (!isOpen(store, hour)) continue                      // ①
+            if (!store.deliveryAvailable) continue                  // ②
+            val (dist, _) = distanceToSegment(store.lat, store.lng, destLat, destLng, destLat, destLng)
+            if (dist > MAX_DELIVERY_M) continue                     // ③
+            val deliveryMin = deliveryMinutes(dist)
+            for (menu in store.menus) {
+                if ((menu.cookMin + deliveryMin) * 60L > remainSec) continue  // ④
+                val matches = menu.tags.count { it in wantedTags }
+                if (wantedTags.isNotEmpty() && matches == 0) continue          // ⑤
+                val score = matches * 10.0 - dist / 100.0
+                results += Recommendation(store, menu, dist.roundToInt(), remainSec, score,
+                    delivery = true, deliveryMin = deliveryMin)
             }
         }
         return results
