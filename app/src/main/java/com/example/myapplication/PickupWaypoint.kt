@@ -18,5 +18,5 @@ object PickupWaypoint {
     }
 
     fun isSamePlace(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Boolean =
-        Recommender.distanceToSegment(lat1, lng1, lat2, lng2, lat2, lng2).first <= MATCH_RADIUS_M
+        Recommender.distanceM(lat1, lng1, lat2, lng2) <= MATCH_RADIUS_M
 }

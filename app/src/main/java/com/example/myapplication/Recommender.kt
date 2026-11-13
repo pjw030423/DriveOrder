@@ -99,10 +99,12 @@ object Recommender {
                 results += Recommendation(store, menu, detour.roundToInt(), arriveSec, score)
             }
         }
-        return results
-            .sortedWith(compareByDescending<Recommendation> { it.score }.thenBy { it.menu.price })
-            .take(limit)
+        return rank(results, limit)
     }
+
+    /** 점수 높은 순, 같으면 싼 순으로 limit개 */
+    private fun rank(results: List<Recommendation>, limit: Int): List<Recommendation> =
+        results.sortedWith(compareByDescending<Recommendation> { it.score }.thenBy { it.menu.price }).take(limit)
 
     /** 목적지에서 이만큼(m)까지의 매장만 배달 */
     const val MAX_DELIVERY_M = 3000.0
@@ -130,7 +132,7 @@ object Recommender {
         for (store in stores) {
             if (!isOpen(store, hour)) continue                      // ①
             if (!store.deliveryAvailable) continue                  // ②
-            val (dist, _) = distanceToSegment(store.lat, store.lng, destLat, destLng, destLat, destLng)
+            val dist = distanceM(store.lat, store.lng, destLat, destLng)
             if (dist > MAX_DELIVERY_M) continue                     // ③
             val deliveryMin = deliveryMinutes(dist)
             for (menu in store.menus) {
@@ -142,12 +144,14 @@ object Recommender {
                     delivery = true, deliveryMin = deliveryMin)
             }
         }
-        return results
-            .sortedWith(compareByDescending<Recommendation> { it.score }.thenBy { it.menu.price })
-            .take(limit)
+        return rank(results, limit)
     }
 
     fun isOpen(store: Store, hour: Int): Boolean = hour >= store.openHour && hour < store.closeHour
+
+    /** 두 지점 사이 직선거리(m) */
+    fun distanceM(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double =
+        distanceToSegment(lat1, lng1, lat2, lng2, lat2, lng2).first
 
     /**
      * 점 P(매장)에서 선분 AB(현재 위치→목적지)까지의 최단 거리(m)와 투영 위치 t(0~1).

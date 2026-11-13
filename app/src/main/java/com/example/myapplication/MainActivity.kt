@@ -313,14 +313,7 @@ class MainActivity : ComponentActivity() {
                     Text(orderText, fontSize = 22.sp)
                     if (order != null) {
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = {
-                            if (waypointAdded) naviHelper.removeWaypoint(WaypointIndex.FIRST)
-                            waypointAdded = false
-                            waypointRemainSec = null
-                            order = null
-                            OrderTrackingService.stop(this@MainActivity)
-                            orderText = ""
-                        }) { Text("주문 화면 닫기 + 경유지 삭제 (테스트용)") }
+                        Button(onClick = { clearOrder("") }) { Text("주문 화면 닫기 + 경유지 삭제 (테스트용)") }
                     }
                     // 데모용 가상 주행: 에뮬레이터는 차가 움직이지 않아 남은 시간이 줄지 않음
                     Spacer(Modifier.height(8.dp))
@@ -379,9 +372,7 @@ class MainActivity : ComponentActivity() {
     // 4단계: 가는 길 + 영업 중 + 도착 전 조리 가능 + 원하는 맛 → 메뉴 추천
     private fun recommend(tags: Set<String>) = lifecycleScope.launch {
         try {
-            if (stores.isEmpty()) {
-                stores = FirestoreRest.listDocuments("stores").map { storeFromJson(it) }
-            }
+            ensureStores()
             val remain = lastRemainSec
             val recs = computeRecs(tags, delivery = deliveryMode)
             if (remain == null || recs == null) {
@@ -493,7 +484,7 @@ class MainActivity : ComponentActivity() {
     /** 🎤 버튼: 매장 목록을 준비하고 대화 시작 */
     private fun startVoiceOrder() = lifecycleScope.launch {
         try {
-            if (stores.isEmpty()) stores = FirestoreRest.listDocuments("stores").map { storeFromJson(it) }
+            ensureStores()
         } catch (e: Exception) {
             Log.e(TAG, "매장 불러오기 실패", e)
         }
@@ -604,18 +595,15 @@ class MainActivity : ComponentActivity() {
     // 5단계: 매장 웹이 바꾼 상태(조리 중·완료)를 읽어 오고, 전송 시각이 되면 'sent'로 표시
     private suspend fun syncOrderStatus() {
         val current = order ?: return
+        // 픽업·배달 완료 후에는 더 바뀔 상태가 없음 → 5초마다 서버 조회하지 않음
+        if (current.status == Order.STATUS_PICKED_UP) return
         try {
             val now = System.currentTimeMillis()
             val doc = FirestoreRest.getDocument("orders", current.id)
             if (doc == null) {
                 // 서버에서 주문이 삭제됨(매장 취소·테스트 정리 등) → 차에서도 주문을 내려놓음
                 Log.d(TAG, "주문이 서버에서 삭제됨: ${current.id}")
-                if (waypointAdded) naviHelper.removeWaypoint(WaypointIndex.FIRST)
-                waypointAdded = false
-                waypointRemainSec = null
-                order = null
-                OrderTrackingService.stop(this)
-                orderText = "주문이 취소되었어요 (매장에서 삭제됨)"
+                clearOrder("주문이 취소되었어요 (매장에서 삭제됨)")
                 return
             }
             var status = doc.optString("status", current.status)
@@ -631,6 +619,21 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "주문 상태 조회 실패", e)
         }
         renderOrder()
+    }
+
+    /** 진행 중인 주문을 내려놓음: 경유지 삭제, 서비스 종료, 안내 문구 표시 */
+    private fun clearOrder(message: String) {
+        if (waypointAdded) naviHelper.removeWaypoint(WaypointIndex.FIRST)
+        waypointAdded = false
+        waypointRemainSec = null
+        order = null
+        OrderTrackingService.stop(this)
+        orderText = message
+    }
+
+    /** 매장 목록이 비어 있으면 Firestore에서 불러옴 */
+    private suspend fun ensureStores() {
+        if (stores.isEmpty()) stores = FirestoreRest.listDocuments("stores").map { storeFromJson(it) }
     }
 
     private fun renderOrder() {
