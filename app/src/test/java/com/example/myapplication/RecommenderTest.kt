@@ -105,4 +105,31 @@ class RecommenderTest {
         val far = Store("far", "먼집", "한식", 37.53, 127.0276, 0, 24, true, true, listOf(menu("x", "국밥", 9000, 5, "국물")))
         assertTrue(Recommender.recommendDelivery(listOf(far), destLat, destLng, 3600, 12).isEmpty())
     }
+
+    // ---------- 경로가 없을 때: 현재 위치 근처 픽업 ----------
+
+    @Test
+    fun 경로가_없으면_근처_매장을_조리시간과_무관하게_추천하고_대기가_짧은_순() {
+        // 양재국수 옆에서 출발: 강남역 매장들은 5km 안, 모두 후보
+        val recs = Recommender.recommendNearby(stores, 37.4870, 127.0350, 16, limit = 10)
+        assertTrue(recs.isNotEmpty())
+        assertTrue(recs.any { it.menu.cookMin * 60 > it.arriveSec })   // 조리가 더 걸려도 제외하지 않음
+        assertTrue(recs.any { it.store.name == "양재국수" })
+        // 바로 옆 국수집(도착 즉시, 조리 6분 대기)보다 가는 동안 조리가 끝나는 샐러드집(약 5분 거리, 조리 5분)이 먼저
+        assertEquals("테헤란샐러드", recs.first().store.name)
+        assertTrue(recs.zipWithNext().all { (a, b) -> a.score >= b.score })
+    }
+
+    @Test
+    fun 근처_반경_밖_매장과_픽업_불가_매장은_제외() {
+        val far = Recommender.recommendNearby(stores, 37.40, 127.10, 16)   // 강남역에서 10km 이상
+        assertTrue(far.isEmpty())
+        val noPickup = stores.map { it.copy(pickupAvailable = false) }
+        assertTrue(Recommender.recommendNearby(noPickup, destLat, destLng, 16).isEmpty())
+    }
+
+    @Test
+    fun 예상_주행시간은_직선거리의_1_3배를_시속_36km로() {
+        assertEquals(130L, Recommender.driveSecEstimate(1000.0))   // 1000m × 1.3 ÷ 600m/분 = 2.17분
+    }
 }

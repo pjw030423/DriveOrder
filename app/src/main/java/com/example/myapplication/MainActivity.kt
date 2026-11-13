@@ -22,14 +22,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.util.Calendar
 import java.util.TimeZone
+import ai.pleos.playground.navi.constants.BookmarkType
 import ai.pleos.playground.navi.constants.NaviErrorCode
 import ai.pleos.playground.navi.constants.WaypointIndex
+import ai.pleos.playground.navi.data.BookmarkInfo
 import ai.pleos.playground.navi.data.CurrentLocationInfo
+import ai.pleos.playground.navi.data.RecentDestinationInfo
 import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteInfo
@@ -63,6 +67,7 @@ class MainActivity : ComponentActivity() {
 
     private val TAG = "DriveOrder"
     private val POLL_MS = 5_000L            // 자동 조회 주기: 5초
+    private val LISTEN_TIMEOUT_MS = 8_000L  // 이만큼 아무 말이 없으면 듣기 종료
 
     private lateinit var naviHelper: NaviHelper
     private var connected = false           // 내비 서비스 연결 여부
@@ -86,7 +91,22 @@ class MainActivity : ComponentActivity() {
     @Volatile private var ttsReady = false
     @Volatile private var sttReady = false
     private var listenAfterSpeak = false              // 안내를 다 읽은 뒤 바로 들을지
-    private val voiceDialog = VoiceDialog { tags, delivery -> computeRecs(tags, limit = 10, delivery = delivery) }
+    private var listenTimeout: Job? = null            // 듣는 중 무응답 타이머 (STT는 무음이면 끝나지 않음)
+    private val voiceDialog = VoiceDialog(
+        recommend = { tags, delivery, place -> computeRecs(tags, limit = 10, delivery = delivery, place = place) },
+        hasDestination = { hasRoute() },
+        // 질문에서 앞의 3곳만 읽음: 집·회사 → 데모 장소(강남역) → 최근 목적지
+        // 최근 목적지 중 가상 매장(픽업하러 갔던 곳)은 배달 장소에서 뺌
+        places = {
+            (navPlaces.filter { it.aliases.isNotEmpty() } + DEMO_PLACE + navPlaces)
+                .filter { p -> stores.none { it.name == p.name } }
+                .distinctBy { it.name }
+        }
+    )
+    @Volatile private var navPlaces: List<Place> = emptyList()   // 내비 즐겨찾기 + 최근 목적지 (배달 장소 후보)
+    // 경로가 없을 때 고른 주문: 경로를 조회해 내비 ETA를 받은 뒤 주문 (pendingTo = 배달 받을 곳 이름)
+    @Volatile private var pendingRec: Recommendation? = null
+    private var pendingTo: String = ""
     private var deliveryMode by mutableStateOf(false)  // ⑤ 추천 버튼의 주문 방식 (false=픽업)
 
     // 데모용 가상 주행 (DemoDrive.kt 참고)
@@ -108,10 +128,16 @@ class MainActivity : ComponentActivity() {
     private val DEFAULT_LAT = 37.4127212
     private val DEFAULT_LNG = 127.094681
 
+    // 데모 장소: 가상 매장들이 모여 있는 강남역. 내비 즐겨찾기가 비어 있어도 배달 장소로 고를 수 있게 함
+    private val DEMO_PLACE = Place("강남역", 37.4979, 127.0276)
+
     private val naviListener = object : NaviHelperEventListener {
         override fun onRouteStarted(routeStartInfo: RouteStartInfo) {
             Log.d(TAG, "경로 탐색 시작: $routeStartInfo")
             show("경로 탐색 시작\n$routeStartInfo")
+            // onRoutingCompleted가 오지 않는 경우가 있어(2026-11-13 에뮬레이터 확인) 안내가 시작되면 바로 조회 시작
+            routeActive = true
+            naviHelper.getDestinationInfo()
         }
 
         override fun onRoutingCompleted() {
@@ -144,6 +170,7 @@ class MainActivity : ComponentActivity() {
             destLng = destinationInfo.longitude.toString().toDoubleOrNull()
             destName = destinationInfo.name.toString()
             lastRemainSec = if (noRoute) null else remain
+            if (!noRoute) routeActive = true   // 내비에 이미 경로가 있으면 자동 조회 시작
 
             val newPlan = when {
                 noRoute -> "⚠️ 경로 없음: 내비에 목적지를 먼저 설정하세요"
@@ -156,9 +183,40 @@ class MainActivity : ComponentActivity() {
             //  - 배달: 목적지 도착 시각이 기준 → 목적지 ETA를 그대로 사용
             //  - 픽업: 매장이 경유지로 잡히기 전까지만 위치 비율로 추정 → 이후엔 내비의 경유지 ETA 사용
             if (!noRoute && remain != null) {
+                // 경로가 없을 때 고른 주문: 방금 조회한 경로의 ETA로 이제 주문
+                pendingRec?.let { rec ->
+                    pendingRec = null
+                    Log.d(TAG, "경로 조회 완료 → 대기 주문 진행 (ETA ${remain}초)")
+                    placeOrder(rec.copy(arriveSec = remain), deliveryTo = pendingTo, viaWaypoint = false)
+                    return
+                }
                 if (order?.isDelivery == true) rescheduleOrder(remain)
                 else if (waypointRemainSec == null) rescheduleOrder(estimateStoreRemain(remain))
             }
+        }
+
+        // 배달 장소 후보: 즐겨찾기(집·회사 등)
+        override fun onBookmarkInfo(bookmarkInfoList: List<BookmarkInfo>) {
+            // 설정 안 된 즐겨찾기는 이름이 비고 좌표가 0으로 옴 (에뮬레이터 확인) → 제외
+            val list = bookmarkInfoList.filter { it.latitude != 0.0 || it.longitude != 0.0 }.map { b ->
+                val alias = when (b.category) {
+                    BookmarkType.HOME -> listOf("집")
+                    BookmarkType.OFFICE -> listOf("회사", "사무실", "직장")
+                    else -> emptyList()
+                }
+                Place(b.name.ifBlank { alias.firstOrNull() ?: "즐겨찾기" }, b.latitude, b.longitude, alias)
+            }
+            Log.d(TAG, "즐겨찾기 ${list.size}곳: ${list.joinToString { it.name }}")
+            navPlaces = (list + navPlaces.filter { it.aliases.isEmpty() }).distinctBy { it.name }
+        }
+
+        // 배달 장소 후보: 최근 목적지
+        override fun onRecentDestinationInfo(recentDestinationInfoList: List<RecentDestinationInfo>) {
+            val list = recentDestinationInfoList
+                .filter { it.name.isNotBlank() && (it.latitude != 0.0 || it.longitude != 0.0) }
+                .map { Place(it.name, it.latitude, it.longitude) }
+            Log.d(TAG, "최근 목적지 ${list.size}곳: ${list.joinToString { it.name }}")
+            navPlaces = (navPlaces.filter { it.aliases.isNotEmpty() } + list).distinctBy { it.name }
         }
 
         // 6단계: 경유지 추가/삭제 결과 → 경유지 정보(남은 시간) 요청
@@ -197,6 +255,11 @@ class MainActivity : ComponentActivity() {
         override fun onError(errorCode: NaviErrorCode) {
             Log.e(TAG, "내비 오류: $errorCode")
             show("오류: $errorCode")
+            if (pendingRec != null) {   // 경로를 못 찾으면 대기 주문도 접음
+                pendingRec = null
+                OrderTrackingService.stop(this@MainActivity)
+                runOnUiThread { orderText = "❌ 경로를 찾지 못해 주문하지 않았어요 ($errorCode)" }
+            }
         }
     }
 
@@ -208,6 +271,7 @@ class MainActivity : ComponentActivity() {
             onConnected = {
                 connected = true
                 naviHelper.addListener(naviListener)
+                loadNavPlaces()
                 show("✅ NaviHelper 연결 성공")
             },
             onFailed = { e ->
@@ -244,30 +308,21 @@ class MainActivity : ComponentActivity() {
                     // 7단계: 음성 주문. 마이크가 안 되는 환경(에뮬레이터 등)을 위해 같은 문장을 버튼으로도 입력
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { startVoiceOrder() }) { Text("🎤 음성 주문", fontSize = 22.sp) }
-                        listOf("국물 있는 거", "치킨", "배달로 받을래", "네", "아니요", "취소").forEach { say ->
-                            Button(onClick = { handleVoice(say) }) {
-                                Text("\"$say\"")
-                            }
+                        listOf("국물 있는 거", "치킨", "픽업", "배달").forEach { say ->
+                            Button(onClick = { handleVoice(say) }) { Text("\"$say\"") }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("강남역", "네", "아니요", "취소").forEach { say ->
+                            Button(onClick = { handleVoice(say) }) { Text("\"$say\"") }
                         }
                     }
                     if (voiceStatus.isNotEmpty()) Text(voiceStatus, fontSize = 20.sp)
                     if (voiceLog.isNotEmpty()) Text(voiceLog, fontSize = 22.sp)
                     Spacer(Modifier.height(24.dp))
                     Button(onClick = {
-                        lastRemain = null
                         // 데모 목적지: 강남역 (가상 매장들이 강남역 주변에 있음. 출발은 에뮬레이터 기본 위치 성남 42dot)
-                        naviHelper.requestRoute(
-                            RouteInfo(
-                                latitude = 37.4979,
-                                longitude = 127.0276,
-                                displayLongitude = null,
-                                displayLatitude = null,
-                                poiName = "강남역",
-                                poiId = "",
-                                poiSubId = "0",
-                                address = "서울 강남구 강남대로 396"
-                            )
-                        )
+                        routeTo(DEMO_PLACE.name, DEMO_PLACE.lat, DEMO_PLACE.lng, "서울 강남구 강남대로 396")
                     }) { Text("① 목적지: 강남역 (데모)") }
                     Spacer(Modifier.height(12.dp))
                     Button(onClick = {
@@ -407,15 +462,54 @@ class MainActivity : ComponentActivity() {
     private fun currentHour(): Int = demoHour
         ?: Calendar.getInstance(TimeZone.getTimeZone("Asia/Seoul")).get(Calendar.HOUR_OF_DAY)
 
-    /** 현재 경로·시각 기준 추천 (매장 목록은 미리 불러와 있어야 함). 경로 정보가 없으면 null */
-    private fun computeRecs(tags: Set<String>, limit: Int = 3, delivery: Boolean = false): List<Recommendation>? {
-        val remain = lastRemainSec ?: return null
-        val dLat = destLat ?: return null
-        val dLng = destLng ?: return null
-        if (delivery) return Recommender.recommendDelivery(stores, dLat, dLng, remain, currentHour(), tags, limit)
-        return Recommender.recommend(
-            stores, curLat ?: DEFAULT_LAT, curLng ?: DEFAULT_LNG, dLat, dLng, remain, currentHour(), tags, limit
+    /** 내비에 경로(목적지 + 남은 시간)가 있는지 */
+    private fun hasRoute() = lastRemainSec != null && destLat != null && destLng != null
+
+    /**
+     * 추천 (매장 목록은 미리 불러와 있어야 함). 계산할 수 없으면 null
+     *  - 픽업: 경로가 있으면 가는 길, 없으면 현재 위치 근처
+     *  - 배달: place가 있으면 그곳(남은 시간은 직선거리로 추정), 없으면 내비 목적지
+     */
+    private fun computeRecs(
+        tags: Set<String>, limit: Int = 3, delivery: Boolean = false, place: Place? = null
+    ): List<Recommendation>? {
+        val cLat = curLat ?: DEFAULT_LAT
+        val cLng = curLng ?: DEFAULT_LNG
+        val hour = currentHour()
+        if (delivery && place != null) {
+            val remain = Recommender.driveSecEstimate(Recommender.distanceM(cLat, cLng, place.lat, place.lng))
+            return Recommender.recommendDelivery(stores, place.lat, place.lng, remain, hour, tags, limit)
+        }
+        val remain = lastRemainSec
+        val dLat = destLat
+        val dLng = destLng
+        if (remain == null || dLat == null || dLng == null) {
+            return if (delivery) null else Recommender.recommendNearby(stores, cLat, cLng, hour, tags, limit)
+        }
+        if (delivery) return Recommender.recommendDelivery(stores, dLat, dLng, remain, hour, tags, limit)
+        return Recommender.recommend(stores, cLat, cLng, dLat, dLng, remain, hour, tags, limit)
+    }
+
+    /** 내비에 경로 요청 (결과는 onRoutingCompleted → onDestinationInfo로 옴) */
+    private fun routeTo(name: String, lat: Double, lng: Double, address: String = "") {
+        lastRemain = null
+        naviHelper.requestRoute(
+            RouteInfo(
+                latitude = lat, longitude = lng,
+                displayLongitude = null, displayLatitude = null,
+                poiName = name, poiId = "", poiSubId = "0", address = address
+            )
         )
+        Log.d(TAG, "경로 요청: $name ($lat, $lng)")
+    }
+
+    /** 배달 장소 후보(즐겨찾기·최근 목적지) 요청. 결과는 onBookmarkInfo·onRecentDestinationInfo로 옴 */
+    private fun loadNavPlaces() {
+        if (!connected) return
+        naviHelper.getDestinationInfo()      // 경로가 있는지 (있으면 픽업은 가는 길, 배달은 그 목적지)
+        naviHelper.getCurrentLocationInfo()
+        naviHelper.getBookmarkInfo()
+        naviHelper.getRecentDestinationInfo()
     }
 
     // ---------- 7단계: 음성 주문 (STT/TTS, ON_DEVICE 모드라 앱 등록 불필요) ----------
@@ -473,11 +567,15 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 voiceStatus = "🎤 $stt"
                 if (completed && stt.isNotBlank()) handleVoice(stt)
+                else if (stt.isNotBlank()) armListenTimeout()   // 말하는 중이면 타이머 연장
             }
         }
         override fun onError(errorType: SttErrorType) {
             Log.e(TAG, "STT 오류: $errorType")
-            runOnUiThread { voiceStatus = "음성 인식 오류($errorType): 아래 버튼으로 답하세요" }
+            runOnUiThread {
+                listenTimeout?.cancel()
+                voiceStatus = "음성 인식 오류($errorType): 아래 버튼으로 답하세요"
+            }
         }
     }
 
@@ -488,6 +586,8 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "매장 불러오기 실패", e)
         }
+        loadNavPlaces()   // 즐겨찾기·최근 목적지를 최신으로 (배달 장소 질문용)
+        listenTimeout?.cancel()
         voiceLog = ""
         speakReply(voiceDialog.start())
     }
@@ -495,7 +595,9 @@ class MainActivity : ComponentActivity() {
     /** STT 최종 결과 또는 대체 버튼 입력 */
     private fun handleVoice(text: String) {
         if (!voiceDialog.isActive) return
+        listenTimeout?.cancel()
         stt?.takeIf { sttReady }?.stop()
+        voiceStatus = ""
         appendVoiceLog("🙂 $text")
         speakReply(voiceDialog.handle(text))
     }
@@ -503,7 +605,7 @@ class MainActivity : ComponentActivity() {
     private fun speakReply(reply: VoiceDialog.Reply) {
         appendVoiceLog("🔊 ${reply.say}")
         Log.d(TAG, "음성 안내: ${reply.say} (듣기=${reply.listen})")
-        reply.order?.let { placeOrder(it) }
+        reply.order?.let { startOrder(it, reply.place) }
         listenAfterSpeak = reply.listen
         if (ttsReady) tts?.speak(reply.say, true) else if (reply.listen) startListening()
     }
@@ -513,8 +615,23 @@ class MainActivity : ComponentActivity() {
         if (sttReady) {
             voiceStatus = "🎤 말씀하세요"
             stt?.request()
+            armListenTimeout()
         } else {
             voiceStatus = "음성 인식 준비 안 됨: 아래 버튼으로 답하세요"
+        }
+    }
+
+    /** 무응답 타이머를 (다시) 시작. 시간이 지나면 듣기를 멈추고 대화에 "말 없음"을 알림 */
+    private fun armListenTimeout() {
+        listenTimeout?.cancel()
+        listenTimeout = lifecycleScope.launch {
+            delay(LISTEN_TIMEOUT_MS)
+            stt?.takeIf { sttReady }?.stop()
+            voiceStatus = ""                     // "🎤 말씀하세요"가 남지 않게 (다시 들으면 새로 표시)
+            val reply = voiceDialog.timeout() ?: return@launch
+            Log.d(TAG, "음성 무응답 ${LISTEN_TIMEOUT_MS / 1000}초 → 듣기 종료")
+            appendVoiceLog("⏱ (응답 없음)")
+            speakReply(reply)
         }
     }
 
@@ -522,9 +639,29 @@ class MainActivity : ComponentActivity() {
         voiceLog = (voiceLog.lines().filter { it.isNotBlank() } + line).takeLast(6).joinToString("\n")
     }
 
+    /**
+     * 음성으로 고른 메뉴 주문.
+     *  - 경로가 있고 배달 장소를 따로 고르지 않았으면 바로 주문 (픽업은 매장을 경유지로 추가)
+     *  - 경로가 없으면 먼저 경로 조회 (픽업 → 매장, 배달 → 고른 장소). 내비 ETA가 오면 onDestinationInfo에서 주문
+     */
+    private fun startOrder(rec: Recommendation, place: Place?) {
+        if (hasRoute() && place == null) { placeOrder(rec); return }
+        val (name, lat, lng) = if (rec.delivery) {
+            val p = place ?: return   // 배달인데 장소도 경로도 없음 (대화에서 막힘)
+            Triple(p.name, p.lat, p.lng)
+        } else Triple(rec.store.name, rec.store.lat, rec.store.lng)
+        pendingRec = rec
+        pendingTo = if (rec.delivery) name else ""
+        orderText = "🧭 $name 경로를 찾는 중… 도착 시간이 나오면 주문할게요"
+        // 경로를 요청하면 내비가 앞으로 나와 이 앱이 백그라운드가 됨 → 얼지 않도록 서비스를 먼저 켬
+        OrderTrackingService.start(this, "$name 경로를 찾은 뒤 주문을 전달할게요")
+        routeTo(name, lat, lng)
+    }
+
     // 5단계: 추천 메뉴로 주문 생성 → Firestore "orders"에 저장 (매장 웹은 sendAt이 지나면 표시)
-    private fun placeOrder(rec: Recommendation) = lifecycleScope.launch {
-        val newOrder = Order.create(rec, System.currentTimeMillis(), deliveryTo = destName)
+    // viaWaypoint=false: 매장 자체가 내비 목적지인 픽업 (경로가 없을 때 매장으로 안내한 경우)
+    private fun placeOrder(rec: Recommendation, deliveryTo: String = destName, viaWaypoint: Boolean = true) = lifecycleScope.launch {
+        val newOrder = Order.create(rec, System.currentTimeMillis(), deliveryTo = deliveryTo)
         orderText = "주문 저장 중..."
         try {
             val code = FirestoreRest.putDocument("orders", newOrder.id, newOrder.toJson())
@@ -533,7 +670,7 @@ class MainActivity : ComponentActivity() {
             order = newOrder
             waypointRemainSec = null
             demoDrive.reset()
-            if (!newOrder.isDelivery) addStoreWaypoint(newOrder)   // 배달은 경로를 바꾸지 않음
+            if (!newOrder.isDelivery && viaWaypoint) addStoreWaypoint(newOrder)   // 배달은 경로를 바꾸지 않음
             val what = if (newOrder.isDelivery) "목적지 도착에 맞춰 배달 요청 중" else "도착 시간에 맞춰 주문 전달 중"
             OrderTrackingService.start(this@MainActivity, "${newOrder.storeName} · ${newOrder.menuName}: $what")
             renderOrder()

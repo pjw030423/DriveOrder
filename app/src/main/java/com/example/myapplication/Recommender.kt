@@ -147,6 +147,48 @@ object Recommender {
         return rank(results, limit)
     }
 
+    /** 경로가 없을 때 "근처"로 보는 반경(m) */
+    const val NEARBY_M = 5000.0
+
+    /**
+     * 경로 조회 전 예상 주행 시간용: 평균 36km/h, 실제 도로는 직선보다 약 1.3배 김
+     * (42dot → 강남역: 직선 11.1km, 내비 13km·21분 → 추정 24분. 2026-11-13 에뮬레이터 확인)
+     */
+    const val CAR_M_PER_MIN = 600.0
+    const val ROAD_FACTOR = 1.3
+
+    /** 직선거리(m) → 예상 주행 시간(초). 경로를 조회하기 전 후보를 고를 때만 쓰고, 주문은 내비 ETA로 함 */
+    fun driveSecEstimate(distanceM: Double): Long = (distanceM * ROAD_FACTOR / CAR_M_PER_MIN * 60).toLong()
+
+    /**
+     * 경로가 없을 때: 현재 위치 근처에서 들러서 받을 메뉴 추천.
+     * 출발 시각이 정해진 게 아니라 지금 바로 가는 것이므로 조리 시간으로 거르지 않고,
+     * 도착 후 기다리는 시간이 짧을수록 점수를 높게 줌 (slackSec < 0 이면 그만큼 대기).
+     */
+    fun recommendNearby(
+        stores: List<Store>,
+        curLat: Double, curLng: Double,
+        hour: Int,
+        wantedTags: Set<String> = emptySet(),
+        limit: Int = 3
+    ): List<Recommendation> {
+        val results = mutableListOf<Recommendation>()
+        for (store in stores) {
+            if (!isOpen(store, hour) || !store.pickupAvailable) continue
+            val dist = distanceM(store.lat, store.lng, curLat, curLng)
+            if (dist > NEARBY_M) continue
+            val arriveSec = driveSecEstimate(dist)
+            for (menu in store.menus) {
+                val matches = menu.tags.count { it in wantedTags }
+                if (wantedTags.isNotEmpty() && matches == 0) continue
+                val waitMin = (menu.cookMin * 60L - arriveSec).coerceAtLeast(0) / 60.0
+                val score = matches * 10.0 - waitMin - dist / 500.0
+                results += Recommendation(store, menu, dist.roundToInt(), arriveSec, score)
+            }
+        }
+        return rank(results, limit)
+    }
+
     fun isOpen(store: Store, hour: Int): Boolean = hour >= store.openHour && hour < store.closeHour
 
     /** 두 지점 사이 직선거리(m) */
