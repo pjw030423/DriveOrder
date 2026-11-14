@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private val TAG = "DriveOrder"
     private val POLL_MS = 5_000L            // 자동 조회 주기: 5초
     private val LISTEN_TIMEOUT_MS = 8_000L  // 이만큼 아무 말이 없으면 듣기 종료
+    private val ROUTE_TIMEOUT_MS = 20_000L  // 경로 조회 후 이만큼 경로가 시작되지 않으면 주문 접음
 
     private lateinit var naviHelper: NaviHelper
     private var connected = false           // 내비 서비스 연결 여부
@@ -76,10 +78,6 @@ class MainActivity : ComponentActivity() {
 
     private var status by mutableStateOf("NaviHelper 연결 중...")
     private var plan by mutableStateOf("")
-    private var storeText by mutableStateOf("")   // 3단계: 매장 데이터 결과 표시
-    private var recText by mutableStateOf("")     // 4단계: 추천 결과 표시
-    private var demoHour by mutableStateOf<Int?>(null)  // 데모용 시각 고정 (null = 현재 한국 시각)
-    private var recs by mutableStateOf<List<Recommendation>>(emptyList())  // 5단계: 주문 버튼용
     private var order by mutableStateOf<Order?>(null)   // 5단계: 진행 중인 주문
     private var orderText by mutableStateOf("")
     private var waypointAdded = false                 // 6단계: 매장을 내비 경유지로 추가했는지
@@ -107,7 +105,6 @@ class MainActivity : ComponentActivity() {
     // 경로가 없을 때 고른 주문: 경로를 조회해 내비 ETA를 받은 뒤 주문 (pendingTo = 배달 받을 곳 이름)
     @Volatile private var pendingRec: Recommendation? = null
     private var pendingTo: String = ""
-    private var deliveryMode by mutableStateOf(false)  // ⑤ 추천 버튼의 주문 방식 (false=픽업)
 
     // 데모용 가상 주행 (DemoDrive.kt 참고)
     private val demoDrive = DemoDrive()
@@ -134,7 +131,7 @@ class MainActivity : ComponentActivity() {
     private val naviListener = object : NaviHelperEventListener {
         override fun onRouteStarted(routeStartInfo: RouteStartInfo) {
             Log.d(TAG, "경로 탐색 시작: $routeStartInfo")
-            show("경로 탐색 시작\n$routeStartInfo")
+            show("🧭 길 안내 시작: ${routeStartInfo.name}")
             // onRoutingCompleted가 오지 않는 경우가 있어(2026-11-13 에뮬레이터 확인) 안내가 시작되면 바로 조회 시작
             routeActive = true
             naviHelper.getDestinationInfo()
@@ -154,11 +151,6 @@ class MainActivity : ComponentActivity() {
             lastRemain = remain
 
             Log.d(TAG, "remainTime=$raw (변화 $delta), remainDistance=${destinationInfo.remainDistance}")
-            show(
-                "목적지: ${destinationInfo.name}\n" +
-                "남은 거리: ${destinationInfo.remainDistance}\n" +
-                "남은 시간(원본 값): $raw   변화: ${delta ?: "-"}"
-            )
 
             // remainTime 단위는 '초'로 가정 (5초 간격 로그의 변화량이 약 -5인지로 확인)
             // 경로가 없으면 내비가 거리·시간을 0으로 돌려줌 → "즉시 전송"으로 오판하지 않도록 먼저 걸러냄
@@ -170,12 +162,13 @@ class MainActivity : ComponentActivity() {
             destLng = destinationInfo.longitude.toString().toDoubleOrNull()
             destName = destinationInfo.name.toString()
             lastRemainSec = if (noRoute) null else remain
+            show(if (noRoute || distance == null) "📍 목적지 없음" else "📍 목적지: $destName · ${"%.1f".format(distance / 1000.0)}km")
             if (!noRoute) routeActive = true   // 내비에 이미 경로가 있으면 자동 조회 시작
 
             val newPlan = when {
-                noRoute -> "⚠️ 경로 없음: 내비에 목적지를 먼저 설정하세요"
+                noRoute -> "🎤 음성 주문으로 근처 매장 픽업이나 원하는 곳 배달을 주문할 수 있어요"
                 remain == null -> "남은 시간 형식 확인 필요: $raw"
-                else -> "목적지까지 약 ${remain / 60}분 · ⑤ 추천 후 주문할 수 있어요"
+                else -> "목적지까지 약 ${remain / 60}분 · 🎤 음성 주문으로 가는 길에 주문할 수 있어요"
             }
             runOnUiThread { plan = newPlan }
 
@@ -305,78 +298,35 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(16.dp))
                     Text(plan, fontSize = 26.sp)
                     Spacer(Modifier.height(16.dp))
-                    // 7단계: 음성 주문. 마이크가 안 되는 환경(에뮬레이터 등)을 위해 같은 문장을 버튼으로도 입력
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { startVoiceOrder() }) { Text("🎤 음성 주문", fontSize = 22.sp) }
-                        listOf("국물 있는 거", "치킨", "픽업", "배달").forEach { say ->
-                            Button(onClick = { handleVoice(say) }) { Text("\"$say\"") }
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("강남역", "네", "아니요", "취소").forEach { say ->
-                            Button(onClick = { handleVoice(say) }) { Text("\"$say\"") }
-                        }
-                    }
+                    Button(onClick = { startVoiceOrder() }) { Text("🎤 음성 주문", fontSize = 26.sp) }
                     if (voiceStatus.isNotEmpty()) Text(voiceStatus, fontSize = 20.sp)
                     if (voiceLog.isNotEmpty()) Text(voiceLog, fontSize = 22.sp)
-                    Spacer(Modifier.height(24.dp))
-                    Button(onClick = {
-                        // 데모 목적지: 강남역 (가상 매장들이 강남역 주변에 있음. 출발은 에뮬레이터 기본 위치 성남 42dot)
-                        routeTo(DEMO_PLACE.name, DEMO_PLACE.lat, DEMO_PLACE.lng, "서울 강남구 강남대로 396")
-                    }) { Text("① 목적지: 강남역 (데모)") }
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = {
-                        // 내비에 이미 설정된 경로가 있으면 그 경로로 자동 조회 시작
-                        routeActive = true
-                        naviHelper.getDestinationInfo()
-                        naviHelper.getCurrentLocationInfo()
-                    }) {
-                        Text("② 현재 경로로 조회 시작")
-                    }
-                    Spacer(Modifier.height(24.dp))
-                    Button(onClick = { uploadSeed() }) { Text("③ 매장 데이터 업로드 (최초 1회)") }
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = { loadStores() }) { Text("④ 매장 목록 불러오기") }
-                    Spacer(Modifier.height(16.dp))
-                    Text(storeText, fontSize = 20.sp)
-                    Spacer(Modifier.height(24.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { recommend(emptySet()) }) { Text("⑤ 추천: 아무거나") }
-                        Button(onClick = { recommend(setOf("국물")) }) { Text("국물") }
-                        Button(onClick = { recommend(setOf("빠름")) }) { Text("빠른 것") }
-                        Button(onClick = { deliveryMode = !deliveryMode; recs = emptyList(); recText = "" }) {
-                            Text(if (deliveryMode) "방식: 🛵 목적지 배달" else "방식: 🛍️ 가는 길 픽업")
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    // 데모 시각 전환: 현재 → 점심 12시 → 저녁 18시 → 현재 …
-                    Button(onClick = {
-                        demoHour = when (demoHour) { null -> 12; 12 -> 18; else -> null }
-                    }) { Text("시간: ${demoHour?.let { "데모 ${it}시" } ?: "현재 시각"} (눌러서 변경)") }
-                    Spacer(Modifier.height(16.dp))
-                    Text(recText, fontSize = 20.sp)
-                    // 5단계: 추천 결과마다 주문 버튼 (진행 중인 주문이 없을 때만)
-                    if (order == null) {
-                        recs.forEachIndexed { i, r ->
-                            Spacer(Modifier.height(8.dp))
-                            Button(onClick = { placeOrder(r) }) {
-                                Text("주문 ${i + 1}: ${r.store.name} · ${r.menu.name}")
-                            }
-                        }
-                    }
                     Spacer(Modifier.height(16.dp))
                     Text(orderText, fontSize = 22.sp)
                     if (order != null) {
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = { clearOrder("") }) { Text("주문 화면 닫기 + 경유지 삭제 (테스트용)") }
+                        Button(onClick = { clearOrder("") }) { Text("주문 화면 닫기") }
                     }
-                    // 데모용 가상 주행: 에뮬레이터는 차가 움직이지 않아 남은 시간이 줄지 않음
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(40.dp))
+                    // 마이크가 없는 환경(에뮬레이터 등)을 위해 같은 대답을 버튼으로도 입력
+                    Text("마이크가 없을 때 대답 입력", fontSize = 16.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { demoDrive.toggle(); demoOn = demoDrive.enabled }) {
+                        listOf("국물 있는 거", "치킨", "픽업", "배달", "강남역", "네", "아니요", "취소").forEach { say ->
+                            OutlinedButton(onClick = { handleVoice(say) }) { Text("\"$say\"") }
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    Text("시연용", fontSize = 16.sp)
+                    // 데모 목적지: 강남역 (가상 매장들이 강남역 주변에 있음. 출발은 에뮬레이터 기본 위치 성남 42dot)
+                    // 데모용 가상 주행: 에뮬레이터는 차가 움직이지 않아 남은 시간이 줄지 않음
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            routeTo(DEMO_PLACE.name, DEMO_PLACE.lat, DEMO_PLACE.lng, "서울 강남구 강남대로 396")
+                        }) { Text("목적지: 강남역") }
+                        OutlinedButton(onClick = { demoDrive.toggle(); demoOn = demoDrive.enabled }) {
                             Text(if (demoOn) "데모 주행: 켜짐 (가상)" else "데모 주행: 꺼짐")
                         }
-                        if (demoOn) Button(onClick = { demoDrive.addDelay(180); Log.d(TAG, "데모: 정체 +3분") }) {
+                        if (demoOn) OutlinedButton(onClick = { demoDrive.addDelay(180); Log.d(TAG, "데모: 정체 +3분") }) {
                             Text("정체 +3분")
                         }
                     }
@@ -385,82 +335,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // 3단계: assets의 가상 매장 데이터를 Firestore에 업로드
-    private fun uploadSeed() = lifecycleScope.launch {
-        storeText = "업로드 중..."
-        try {
-            val json = assets.open("stores_seed.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
-            val stores = JSONObject(json).getJSONArray("stores")
-            var ok = 0
-            for (i in 0 until stores.length()) {
-                val store = stores.getJSONObject(i)
-                val code = FirestoreRest.putDocument("stores", store.getString("id"), store)
-                Log.d(TAG, "업로드 ${store.getString("id")} → HTTP $code")
-                if (code in 200..299) ok++
-            }
-            storeText = "✅ 업로드 완료: $ok / ${stores.length()}개 매장"
-        } catch (e: Exception) {
-            Log.e(TAG, "업로드 실패", e)
-            storeText = "❌ 업로드 실패: ${e.message}"
-        }
-    }
-
-    // 3단계: Firestore에서 매장 목록을 다시 읽어 와 표시
-    private fun loadStores() = lifecycleScope.launch {
-        storeText = "불러오는 중..."
-        try {
-            val stores = FirestoreRest.listDocuments("stores")
-            storeText = if (stores.isEmpty()) {
-                "매장이 없습니다. ③ 업로드를 먼저 누르세요."
-            } else {
-                stores.joinToString("\n") { s ->
-                    val menuCount = s.optJSONArray("menus")?.length() ?: 0
-                    "• ${s.optString("name")} (${s.optString("category")}) · 메뉴 ${menuCount}개"
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "불러오기 실패", e)
-            storeText = "❌ 불러오기 실패: ${e.message}"
-        }
-    }
-
-    // 4단계: 가는 길 + 영업 중 + 도착 전 조리 가능 + 원하는 맛 → 메뉴 추천
-    private fun recommend(tags: Set<String>) = lifecycleScope.launch {
-        try {
-            ensureStores()
-            val remain = lastRemainSec
-            val recs = computeRecs(tags, delivery = deliveryMode)
-            if (remain == null || recs == null) {
-                recText = "⚠️ 경로 정보가 없습니다. 내비에 목적지를 설정하고 ② 버튼을 먼저 누르세요."
-                return@launch
-            }
-            val hour = currentHour()
-            this@MainActivity.recs = recs
-            val timeLabel = if (demoHour != null) "데모 ${hour}시" else "현재 ${hour}시"
-            val modeLabel = if (deliveryMode) "목적지 배달" else "가는 길 픽업"
-            val header = "$timeLabel · $modeLabel · 목적지까지 ${remain / 60}분 · 조건 ${if (tags.isEmpty()) "없음" else tags.joinToString()}"
-            val body = if (recs.isEmpty()) {
-                "조건에 맞는 메뉴가 없습니다 (영업시간·조리시간·${if (deliveryMode) "배달 거리" else "경로"} 확인)"
-            } else {
-                recs.mapIndexed { i, r ->
-                    val line2 = if (r.delivery)
-                        "    목적지에서 ${r.detourM}m · 조리 ${r.menu.cookMin}분 + 배달 ${r.deliveryMin}분 (여유 ${r.slackSec / 60}분)"
-                    else
-                        "    경로에서 ${r.detourM}m · 매장까지 약 ${r.arriveSec / 60}분 · 조리 ${r.menu.cookMin}분 (여유 ${r.slackSec / 60}분)"
-                    "${i + 1}. ${r.store.name} · ${r.menu.name} ${"%,d".format(r.menu.price)}원\n$line2"
-                }.joinToString("\n")
-            }
-            val note = if (curLat == null) "\n(현재 위치 미수신: 기본 위치 42dot 기준으로 계산)" else ""
-            recText = "$header\n$body$note"
-        } catch (e: Exception) {
-            Log.e(TAG, "추천 실패", e)
-            recText = "❌ 추천 실패: ${e.message}"
-        }
-    }
-
     // 에뮬레이터 시계가 UTC일 수 있어 한국 시간으로 계산
-    private fun currentHour(): Int = demoHour
-        ?: Calendar.getInstance(TimeZone.getTimeZone("Asia/Seoul")).get(Calendar.HOUR_OF_DAY)
+    private fun currentHour(): Int =
+        Calendar.getInstance(TimeZone.getTimeZone("Asia/Seoul")).get(Calendar.HOUR_OF_DAY)
 
     /** 내비에 경로(목적지 + 남은 시간)가 있는지 */
     private fun hasRoute() = lastRemainSec != null && destLat != null && destLng != null
@@ -656,6 +533,16 @@ class MainActivity : ComponentActivity() {
         // 경로를 요청하면 내비가 앞으로 나와 이 앱이 백그라운드가 됨 → 얼지 않도록 서비스를 먼저 켬
         OrderTrackingService.start(this, "$name 경로를 찾은 뒤 주문을 전달할게요")
         routeTo(name, lat, lng)
+        // 에뮬레이터를 막 켜서 내비가 준비되지 않으면 경로 요청이 조용히 무시됨 → 기다리지 않고 접음
+        lifecycleScope.launch {
+            delay(ROUTE_TIMEOUT_MS)
+            if (pendingRec === rec) {
+                pendingRec = null
+                OrderTrackingService.stop(this@MainActivity)
+                orderText = "❌ 내비가 경로를 시작하지 않아 주문하지 않았어요. 내비 화면을 한 번 연 뒤 다시 주문해 주세요."
+                if (ttsReady) tts?.speak("내비가 경로를 시작하지 않아 주문하지 않았어요.", true)
+            }
+        }
     }
 
     // 5단계: 추천 메뉴로 주문 생성 → Firestore "orders"에 저장 (매장 웹은 sendAt이 지나면 표시)
@@ -770,7 +657,17 @@ class MainActivity : ComponentActivity() {
 
     /** 매장 목록이 비어 있으면 Firestore에서 불러옴 */
     private suspend fun ensureStores() {
-        if (stores.isEmpty()) stores = FirestoreRest.listDocuments("stores").map { storeFromJson(it) }
+        if (stores.isNotEmpty()) return
+        var docs = FirestoreRest.listDocuments("stores")
+        if (docs.isEmpty()) {
+            // 처음 쓰는 Firestore면 assets의 가상 매장 데이터를 올림
+            val json = assets.open("stores_seed.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val seed = JSONObject(json).getJSONArray("stores")
+            docs = (0 until seed.length()).map { seed.getJSONObject(it) }
+            docs.forEach { FirestoreRest.putDocument("stores", it.getString("id"), it) }
+            Log.d(TAG, "매장 데이터 ${docs.size}곳 업로드")
+        }
+        stores = docs.map { storeFromJson(it) }
     }
 
     private fun renderOrder() {
