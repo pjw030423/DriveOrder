@@ -187,6 +187,12 @@ class VoiceDialog(
             misses = 0
             return next()
         }
+        // "다 별로야", "맘에 드는 게 없어" → 남은 후보를 넘기지 않고 음식부터 다시 (방식·장소는 유지)
+        if (VoiceParser.rejectsAll(text)) {
+            state = State.AskingFood
+            misses = 0
+            return Reply("그럼 다른 걸 찾아볼게요. $FOOD_QUESTION", listen = true)
+        }
         // "방금 거로 해 줘", "처음 거" → 앞서 들은 메뉴로 바로 주문
         if (VoiceParser.wantsFirst(text)) return order(s.recs[0])
         if (VoiceParser.wantsPrevious(text)) return order(s.recs[(s.index - 1).coerceAtLeast(0)])
@@ -291,7 +297,7 @@ object VoiceParser {
     private val PICKUP_WORDS = listOf("포장", "픽업", "들러", "들를", "들렀", "가는 길", "가는길", "직접",
         "가지러", "찾으러", "받으러", "테이크아웃", "내가 갈", "가서 받")
 
-    private val NO_WORDS = listOf("아니", "싫", "다른", "다음", "별로", "말고", "노노", "패스", "바꿔", "안 할", "안할")
+    private val NO_WORDS = listOf("아니", "싫", "다른", "다음", "별로", "별론", "별루", "말고", "노노", "패스", "바꿔", "안 할", "안할")
     private val YES_WORDS = listOf("응", "네", "예", "좋아", "좋네", "좋습니다", "그래", "주문", "해줘", "해 줘", "오케이",
         "콜", "걸로", "그거", "부탁", "할게", "할래", "먹을게", "갈게", "맞아", "가자", "고고", "ㅇㅇ", "yes", "ok")
     private val CANCEL_WORDS = listOf("취소", "그만", "됐어", "안 먹", "안먹")
@@ -342,6 +348,12 @@ object VoiceParser {
 
     /** "아무거나", "추천해 줘" → 음식을 정하지 않고 아무 메뉴나 */
     private val ANY_WORDS = listOf("아무거나", "아무 거나", "아무거", "아무 거", "아무꺼", "뭐든", "뭐라도", "추천", "상관없", "상관 없", "알아서", "맛있는")
+
+    /** "다 별로", "맘에 드는 게 없어" → 제안한 메뉴 전부 싫음 */
+    private val REJECT_ALL_WORDS = listOf("다 별로", "다별로", "다 별론", "다별론", "다 싫", "다싫", "다 아니", "전부", "모두", "죄다",
+        "하나도", "맘에 안", "마음에 안", "맘에 드는 게 없", "마음에 드는 게 없", "땡기는 게 없", "당기는 게 없", "먹고 싶은 게 없")
+
+    fun rejectsAll(text: String) = REJECT_ALL_WORDS.any { it in text }
 
     fun isAnything(text: String) = ANY_WORDS.any { it in text }
 

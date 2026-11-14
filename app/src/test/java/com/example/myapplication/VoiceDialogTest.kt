@@ -260,6 +260,22 @@ class VoiceDialogTest {
         assertTrue(d.handle("네").order!!.delivery)
     }
 
+    @Test
+    fun 다_별로라고_하면_다음_후보_대신_음식을_다시_묻는다() {
+        val d = dialog()
+        d.start()
+        d.handle("국물 픽업")
+        val r = d.handle("뭔가 다 별론데")
+        assertNull(r.order)
+        assertTrue(r.say, r.say.contains("무엇을 드시고 싶으세요"))
+        assertTrue(d.handle("치킨").say.contains("후라이드 치킨"))   // 픽업은 기억해서 다시 묻지 않음
+    }
+
+    @Test
+    fun 별론데도_아니요로_알아듣는다() {
+        assertEquals(VoiceParser.Answer.NO, VoiceParser.answer("그건 별론데"))
+    }
+
     // ---------- 종료·무응답 ----------
 
     @Test
