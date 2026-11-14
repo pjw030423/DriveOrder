@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
         hasDestination = { userRoute() },
         pickupSlots = { PickupRoute.slotsLeft(pickupStores().size, ownDest != null || userRoute()) },
         pickupsPending = { pickupStores().isNotEmpty() },
+        destinationName = { if (userRoute()) destName else "" },
         // 질문에서 앞의 3곳만 읽음: 집·회사 → 데모 장소(강남역) → 최근 목적지
         // 최근 목적지 중 가상 매장(픽업하러 갔던 곳)은 배달 장소에서 뺌
         places = {

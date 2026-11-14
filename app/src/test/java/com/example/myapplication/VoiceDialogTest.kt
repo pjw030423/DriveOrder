@@ -335,6 +335,87 @@ class VoiceDialogTest {
             assertEquals(no, VoiceParser.Answer.UNKNOWN, VoiceParser.answer(no))
     }
 
+    @Test
+    fun 중국집_집밥은_배달_장소_집이_아니다() {
+        assertNull(VoiceParser.place("중국집 배달", listOf(home, gangnam)))
+        assertNull(VoiceParser.place("집밥 배달해줘", listOf(home, gangnam)))
+        assertEquals(home, VoiceParser.place("집으로 보내 줘", listOf(home, gangnam)))
+        val d = noRouteDialog()
+        d.start()
+        assertTrue(d.handle("중국집 배달").say.contains("어디로 배달할까요"))   // 장소를 다시 물음
+    }
+
+    @Test
+    fun 목적지가_있는데_다른_곳으로_배달하라면_목적지_기준이라고_알려_준다() {
+        val d = VoiceDialog(::fakeRecommend, places = { listOf(home, gangnam) }, destinationName = { "강남역" })
+        d.start()
+        val r = d.handle("치킨 집으로 배달")
+        assertTrue(r.say, r.say.startsWith("집은 지금 가시는 목적지가 아니라서 목적지 근처에서 찾았어요."))
+        // 목적지와 같은 곳이면 안내 없음
+        val d2 = VoiceDialog(::fakeRecommend, places = { listOf(home, gangnam) }, destinationName = { "강남역" })
+        d2.start()
+        assertFalse(d2.handle("치킨 강남역으로 배달").say.contains("목적지가 아니라서"))
+    }
+
+    @Test
+    fun 수량을_말하면_이름과_가격에_담아_주문한다() {
+        val d = dialog()
+        d.start()
+        val p = d.handle("치킨 두 마리 픽업")
+        assertTrue(p.say, p.say.contains("후라이드 치킨 2개, 모두 38000원"))
+        val done = d.handle("네")
+        assertEquals("후라이드 치킨 ×2", done.order!!.menu.name)
+        assertEquals(38000, done.order!!.menu.price)
+    }
+
+    @Test
+    fun 제안_중에_수량만_말해도_그_수량으로_주문한다() {
+        val d = dialog()
+        d.start()
+        d.handle("국물 픽업")
+        val done = d.handle("세 개로 해 줘")
+        assertEquals("김치찌개 ×3", done.order!!.menu.name)
+        assertEquals(27000, done.order!!.menu.price)
+    }
+
+    @Test
+    fun 수량은_단위가_있어야_하고_1에서_10까지() {
+        assertEquals(2, VoiceParser.quantity("2개"))
+        assertEquals(4, VoiceParser.quantity("네 잔"))
+        assertNull(VoiceParser.quantity("네"))
+        assertNull(VoiceParser.quantity("두 번째 거"))
+        assertNull(VoiceParser.quantity("50개"))
+    }
+
+    @Test
+    fun 파는_곳이_없는_음식은_없다고_알려_준다() {
+        val d = dialog()
+        d.start()
+        val r = d.handle("비빔밥")
+        assertTrue(r.say, r.say.startsWith("비빔밥은 주문할 수 있는 매장이 없어요"))
+        assertTrue(d.handle("냉면 먹고 싶어").say.startsWith("냉면은"))
+        assertTrue(d.isActive)
+        assertEquals(null, VoiceParser.notSold("회사로 배달"))   // "회"는 회사와 겹치지 않음
+    }
+
+    @Test
+    fun 뭐_있어_모르겠어는_아무거나로_받는다() {
+        for (say in listOf("뭐 있어?", "모르겠어", "네가 골라 줘")) {
+            val d = dialog()
+            d.start()
+            assertEquals(say, VoiceDialog.MODE_QUESTION, d.handle(say).say)
+        }
+    }
+
+    @Test
+    fun 다음에_할게는_대화를_끝낸다() {
+        val d = dialog()
+        d.start()
+        d.handle("국물 픽업")
+        assertFalse(d.handle("다음에 할게").listen)
+        assertFalse(d.isActive)
+    }
+
     // ---------- 종료·무응답 ----------
 
     @Test

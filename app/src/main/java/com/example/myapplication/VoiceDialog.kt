@@ -26,7 +26,9 @@ class VoiceDialog(
     /** 픽업 매장을 몇 곳 더 넣을 수 있는지 (내비 경유지 한도) */
     private val pickupSlots: () -> Int = { Int.MAX_VALUE },
     /** 이미 들를 픽업 매장이 있는지 (있으면 가까운 곳부터 들르도록 경로를 다시 짬) */
-    private val pickupsPending: () -> Boolean = { false }
+    private val pickupsPending: () -> Boolean = { false },
+    /** 내비 목적지 이름 (배달 장소를 말했는데 목적지와 다를 때 안내용) */
+    private val destinationName: () -> String = { "" }
 ) {
     /** 앱이 할 일: say를 읽고, listen이면 다시 듣고, order가 있으면 주문 (place가 있으면 그곳으로 배달) */
     data class Reply(val say: String, val listen: Boolean, val order: Recommendation? = null, val place: Place? = null)
@@ -45,6 +47,8 @@ class VoiceDialog(
     private var place: Place? = null             // 배달 받을 곳 (내비 목적지를 쓰면 null)
     private var tags: Set<String> = emptySet()
     private var food: VoiceParser.Food? = null   // 치킨, 피자 같은 음식 종류 (태그보다 우선)
+    private var qty = 1                          // "두 마리", "2개" → 2
+    private var placeNotice = ""                 // 목적지가 아닌 곳으로 배달해 달라고 했을 때 제안 앞에 붙일 안내
 
     private val delivery get() = mode == VoiceParser.Mode.DELIVERY
 
@@ -57,6 +61,8 @@ class VoiceDialog(
         place = null
         tags = emptySet()
         food = null
+        qty = 1
+        placeNotice = ""
         return Reply(FOOD_QUESTION, listen = true)
     }
 
@@ -98,6 +104,8 @@ class VoiceDialog(
     private fun onFood(text: String): Reply {
         // 음식을 못 알아들었으면 방식으로 넘어가지 않고 다시 물음 ("배달로"만 말했으면 방식은 받아 둠)
         if (!saysFood(text) && !VoiceParser.isAnything(text)) {
+            // 비빔밥·냉면처럼 알아들었지만 파는 매장이 없는 음식은 "못 들었다"가 아니라 없다고 안내
+            VoiceParser.notSold(text)?.let { return Reply("${VoiceDialog.withEunNeun(it)} 주문할 수 있는 매장이 없어요. 치킨, 국밥, 커피처럼 다른 걸 말씀해 주세요.", listen = true) }
             val m = VoiceParser.mode(text) ?: return miss("잘 못 들었어요. $FOOD_QUESTION 아무거나라고 하셔도 돼요.")
             mode = m
             takeModeAndPlace(text)
@@ -108,6 +116,7 @@ class VoiceDialog(
         }
         tags = VoiceParser.tags(text)
         food = VoiceParser.food(text)
+        VoiceParser.quantity(text)?.let { qty = it }
         takeModeAndPlace(text)
         misses = 0
         return next()
@@ -135,8 +144,13 @@ class VoiceDialog(
 
     private fun takeModeAndPlace(text: String) {
         VoiceParser.mode(text)?.let { mode = it }
-        // 장소는 내비 목적지가 없을 때만 받음 (목적지가 있으면 그곳으로 배달 → 주행 경로를 바꾸지 않음)
-        if (delivery && !hasDestination()) VoiceParser.place(text, places())?.let { place = it }
+        if (!delivery) return
+        val said = VoiceParser.place(text, places()) ?: return
+        if (!hasDestination()) { place = said; return }
+        // 목적지가 있으면 그곳으로만 배달 (다른 곳은 도착 시간을 알 수 없음) → 다르면 그렇다고 알려 줌
+        val dest = destinationName()
+        if (dest.isNotBlank() && dest.replace(" ", "") != said.name.replace(" ", ""))
+            placeNotice = "${withEunNeun(said.aliases.firstOrNull() ?: said.name)} 지금 가시는 목적지가 아니라서 목적지 근처에서 찾았어요. "
     }
 
     private fun saysFood(text: String) = VoiceParser.tags(text).isNotEmpty() || VoiceParser.food(text) != null
@@ -169,7 +183,8 @@ class VoiceDialog(
         // 음식 종류를 말했으면 그 음식이 우선 ("배고파, 치킨"에서 '든든' 태그가 치킨을 거르지 않게)
         val found = if (f == null) recs else recs.filter { VoiceParser.matches(f, it) }
             .ifEmpty { (find(emptySet()) ?: emptyList()).filter { VoiceParser.matches(f, it) } }
-        if (found.isNotEmpty()) { misses = 0; return propose(found, 0) }
+        val notice = placeNotice.also { placeNotice = "" }
+        if (found.isNotEmpty()) { misses = 0; return propose(found, 0, prefix = notice) }
 
         // 원하는 게 없으면 끝내지 않고 대신 고를 만한 메뉴를 제안
         val alt = (if (f != null) recs else emptyList()).ifEmpty { find(emptySet()) ?: emptyList() }
@@ -177,7 +192,7 @@ class VoiceDialog(
         val area = if (delivery) "$where 근처에 배달되는 $what" else if (hasDestination()) "가는 길에 $what" else "근처에 $what"
         if (alt.isNotEmpty()) {
             misses = 0
-            return propose(alt, 0, prefix = "${withIGa(area)} 없어요. 대신 ")
+            return propose(alt, 0, prefix = "$notice${withIGa(area)} 없어요. 대신 ")
         }
         state = State.AskingFood   // 방식·장소는 유지하고 음식만 다시
         return miss(
@@ -192,11 +207,22 @@ class VoiceDialog(
         // "아니, 국물로", "배달로 해 줘", "치킨 말고 피자"처럼 새 조건을 말하면 다시 찾음 (말하지 않은 조건은 그대로)
         val newTags = VoiceParser.tags(text)
         val newFood = VoiceParser.food(text)
+        // "두 개로 해 줘", "세 마리" → 수량을 바꾸고 이 메뉴로 주문 (거절하는 말이 없을 때)
+        VoiceParser.quantity(text)?.let { n ->
+            if (newFood == null && VoiceParser.answer(text) != VoiceParser.Answer.NO && !VoiceParser.isQuestion(text)) {
+                qty = n
+                return order(s.recs[s.index])
+            }
+        }
+        if (newFood == null && newTags.isEmpty()) VoiceParser.notSold(text)?.let {
+            state = State.AskingFood
+            return Reply("${withEunNeun(it)} 주문할 수 있는 매장이 없어요. 다른 걸 말씀해 주세요.", listen = true)
+        }
         val newMode = VoiceParser.mode(text)
         val foodChanged = (newFood != null && newFood != food) || (newFood == null && newTags.isNotEmpty() && newTags != tags)
         val modeChanged = newMode != null && newMode != mode
         if (foodChanged || modeChanged) {
-            if (foodChanged) { tags = newTags; food = newFood }
+            if (foodChanged) { tags = newTags; food = newFood; VoiceParser.quantity(text)?.let { qty = it } }
             takeModeAndPlace(text)
             misses = 0
             return next()
@@ -228,8 +254,10 @@ class VoiceDialog(
         }
     }
 
-    private fun order(rec: Recommendation): Reply {
+    private fun order(picked: Recommendation): Reply {
         state = State.Idle
+        // 수량은 메뉴 이름·가격에 담아 보냄 ("후라이드 치킨 ×2", 가격 ×2) → 매장 웹·서버 규칙을 바꾸지 않음
+        val rec = if (qty > 1) picked.copy(menu = picked.menu.copy(name = "${picked.menu.name} ×$qty", price = picked.menu.price * qty)) else picked
         val store = spokenName(rec.store.name)
         val p = if (rec.delivery) place else null
         val say = when {
@@ -257,7 +285,8 @@ class VoiceDialog(
             r.slackSec >= 0 -> "약 ${min}분 뒤 도착하면 바로 받을 수 있어요. 주문할까요?"
             else -> "약 ${min}분 거리이고, 도착 후 ${(-r.slackSec + 59) / 60}분쯤 기다리면 받아요. 주문할까요?"
         }
-        return Reply("$prefix${spokenName(r.store.name)}의 ${r.menu.name}, ${r.menu.price}원이에요. $detail", listen = true)
+        val what = if (qty > 1) "${r.menu.name} ${qty}개, 모두 ${r.menu.price * qty}원" else "${r.menu.name}, ${r.menu.price}원"
+        return Reply("$prefix${spokenName(r.store.name)}의 ${what}이에요. $detail", listen = true)
     }
 
     /** 두 번 연속 못 알아들으면 종료 (운전 중 대화가 길어지지 않게) */
@@ -294,6 +323,13 @@ class VoiceDialog(
             return word + if (hasBatchim) "을" else "를"
         }
 
+        /** 받침 유무에 따라 은/는 ("비빔밥은", "집은", "강남역은") */
+        fun withEunNeun(word: String): String {
+            val last = word.lastOrNull() ?: return word
+            if (last !in '가'..'힣') return "${word}은(는)"
+            return word + if ((last - '가') % 28 != 0) "은" else "는"
+        }
+
         /** 받침 유무에 따라 이/가 ("치킨이", "피자가") */
         fun withIGa(word: String): String {
             val last = word.lastOrNull() ?: return word
@@ -321,7 +357,7 @@ object VoiceParser {
     /** 짧은 대답은 낱말 전체가 같을 때만 승낙 ("예약", "콜라", "응답", "네가"에서 걸리지 않게) */
     private val SHORT_YES = setOf("응", "웅", "네", "넵", "넹", "예", "콜", "ㅇㅇ", "ㅇㅋ", "yes", "ok", "okay",
         "네네", "응응", "예예", "네요", "예요", "넵넵")
-    private val CANCEL_WORDS = listOf("취소", "그만", "됐어", "안 먹", "안먹")
+    private val CANCEL_WORDS = listOf("취소", "그만", "됐어", "안 먹", "안먹", "다음에", "나중에", "이따가", "이따 할")
     /** "방금 거", "아까 그거" → 바로 앞에 제안한 메뉴 / "처음 거" → 첫 제안 */
     // "방금 뭐라고 했어?"처럼 메뉴를 가리키지 않는 말까지 주문으로 받지 않도록 "거·걸·그·메뉴"가 붙은 경우만
     private val PREV_WORDS = listOf("방금 거", "방금거", "방금 걸", "방금 그", "방금 메뉴", "아까 거", "아까거", "아까 걸", "아까 그",
@@ -372,10 +408,38 @@ object VoiceParser {
         Food("덮밥", listOf("덮밥", "제육", "볶음밥"), listOf("덮밥", "제육", "볶음밥")),
         Food("분식", listOf("분식"), listOf("분식")),
         Food("한식", listOf("한식", "집밥"), listOf("한식")),
+        Food("감자튀김", listOf("감자튀김", "감튀", "프렌치프라이"), listOf("감자튀김")),
     )
 
     /** "아무거나", "추천해 줘" → 음식을 정하지 않고 아무 메뉴나 */
-    private val ANY_WORDS = listOf("아무거나", "아무 거나", "아무거", "아무 거", "아무꺼", "뭐든", "뭐라도", "추천", "상관없", "상관 없", "알아서", "맛있는")
+    private val ANY_WORDS = listOf("아무거나", "아무 거나", "아무거", "아무 거", "아무꺼", "뭐든", "뭐라도", "추천", "상관없", "상관 없", "알아서", "맛있는",
+        "뭐 있", "뭐있", "뭐가 있", "모르겠", "골라 줘", "골라줘", "네가 골라", "니가 골라")
+
+    /** 알아들었지만 가상 매장에 없는 음식 (못 들었다고 하지 않고 없다고 안내) */
+    private val NOT_SOLD = listOf("비빔밥", "냉면", "족발", "보쌈", "마라탕", "쌀국수", "삼겹살", "갈비", "곱창", "막창", "닭갈비",
+        "찜닭", "죽", "도시락", "회", "타코", "도넛", "케이크", "아이스크림", "빙수", "주스", "스무디", "빵", "와플", "커리", "카레")
+
+    /** 수량: 숫자나 한글 수 + 단위 ("두 마리", "2개", "세 잔"). 단위가 있어야 "네(대답)"와 헷갈리지 않음 */
+    private val QTY = Regex("(\\d+|한|하나|두|둘|세|셋|네|넷|다섯|여섯)\\s*(개|마리|잔|그릇|판|인분|세트|접시|줄|조각|병|캔)")
+    private val KOR_NUM = mapOf("한" to 1, "하나" to 1, "두" to 2, "둘" to 2, "세" to 3, "셋" to 3, "네" to 4, "넷" to 4, "다섯" to 5, "여섯" to 6)
+
+    /** 1~10개만 받음 (그 밖은 잘못 들은 것으로 봄) */
+    fun quantity(text: String): Int? {
+        val m = QTY.find(text) ?: return null
+        val n = m.groupValues[1].let { it.toIntOrNull() ?: KOR_NUM[it] } ?: return null
+        return n.takeIf { it in 1..10 }
+    }
+
+    /** 가게 이름처럼 "집"이 붙은 말 ("중국집", "집밥", "치킨집")은 배달 장소 "집"으로 보지 않음 */
+    private val NOT_HOME = Regex("집밥|(중국|분식|치킨|통닭|국밥|피자|고깃|고기|찌개|빵|술|밥|횟|떡볶이|돈까스|짜장|족발|맛|국수|칼국수|김밥|초밥|백반)집")
+
+    fun notSold(text: String): String? {
+        val t = afterMalgo(text)
+        return NOT_SOLD.firstOrNull { w ->
+            // "회"는 "회사"와 겹치니 한 글자 음식은 낱말 그대로일 때만
+            if (w.length == 1) t.split(Regex("[\\s,.!?]+")).any { it == w || it == w + "요" } else w in t
+        }
+    }
 
     /** "다 별로", "맘에 드는 게 없어" → 제안한 메뉴 전부 싫음 */
     private val REJECT_ALL_WORDS = listOf("다 별로", "다별로", "다 별론", "다별론", "다 싫", "다싫", "다 아니", "전부", "모두", "죄다",
@@ -413,7 +477,7 @@ object VoiceParser {
 
     /** 말한 문장에서 장소 찾기: 별칭("집", "회사") 또는 이름("강남역")이 들어 있으면. 띄어쓰기는 무시 */
     fun place(text: String, places: List<Place>): Place? {
-        val t = text.replace(" ", "")
+        val t = NOT_HOME.replace(text, "").replace(" ", "")   // 띄어 쓴 "치킨 집으로"는 그대로 둠
         return places.firstOrNull { p ->
             (p.aliases + p.name).any { w -> w.replace(" ", "").let { it.isNotEmpty() && it in t } }
         }
