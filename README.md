@@ -126,10 +126,10 @@ emulator -avd Pleos_Connect_v2.1.0 -no-snapshot-save -gpu swiftshader_indirect
 
 ### 2. 앱 설치
 
-**APK 파일 위치: [`apk/TEAMNAME_DriveOrder_release.apk`](apk/TEAMNAME_DriveOrder_release.apk)** (서명된 release 빌드, 패키지 `com.driveorder.app`)
+**APK 파일 위치: [`apk/LGTM_DriveOrder_release.apk`](apk/LGTM_DriveOrder_release.apk)** (서명된 release 빌드, 패키지 `com.driveorder.app`)
 
 ```bash
-adb install -g apk/TEAMNAME_DriveOrder_release.apk
+adb install -g apk/LGTM_DriveOrder_release.apk
 ```
 
 소스에서 직접 실행하려면 Android Studio에서 실행하거나:
