@@ -38,22 +38,18 @@ class RecommenderTest {
         val r = rec(remainSec = 1260, hour = 12, tags = setOf("국물"))
         assertEquals("store_001", r.first().store.id)
         assertEquals("된장찌개", r.first().menu.name)          // 점수 같으면 더 싼 메뉴 먼저
-        assertFalse(r.any { it.store.id == "store_003" })     // 도착까지 약 3분 → 6분 조리 불가
+        // 출발지 옆 국수: 도착까지 약 3분 → 6분 조리라 기다려야 함 → 제외하진 않지만 뒤로
+        val noodle = r.first { it.store.id == "store_003" }
+        assertTrue(noodle.slackSec < 0)
+        assertTrue(r.indexOf(noodle) > 0)
     }
 
     @Test
-    fun 모든_추천은_도착_전에_조리가_끝난다() {
-        for (remain in listOf(300L, 600L, 1260L)) {
-            rec(remainSec = remain, hour = 18).forEach {
-                assertTrue("${it.menu.name} 여유 ${it.slackSec}초", it.slackSec >= 0)
-            }
-        }
-    }
-
-    @Test
-    fun 조리시간이_긴_치킨은_시간이_부족하면_제외() {
+    fun 조리시간이_긴_치킨은_시간이_부족해도_주문할_수_있지만_순위가_낮다() {
         val r = rec(remainSec = 1260, hour = 18)               // 치킨집 영업 중인 시간
-        assertFalse(r.any { it.store.id == "store_005" })
+        val chicken = r.first { it.store.id == "store_005" }
+        assertTrue(chicken.slackSec < 0)                       // 매장에서 기다림
+        assertTrue(chicken.score < r.first().score)
     }
 
     @Test

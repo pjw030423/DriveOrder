@@ -54,6 +54,7 @@ data class Recommendation(
  *  ② 포장 가능한가        pickupAvailable
  *  ③ 가는 길에 있는가      현재 위치→목적지 직선에서 MAX_DETOUR_M 이내
  *  ④ 도착 전 조리 가능한가  조리 시간 ≤ 매장 도착까지 걸리는 시간   ← 핵심
+ *                         (넘으면 제외하지 않고 매장에서 기다리는 만큼 순위를 낮춤)
  *  ⑤ 원하는 맛인가        tags 일치 (원하는 태그가 있을 때만)
  *
  * 배달(recommendDelivery)은 ②③④가 바뀜
@@ -90,12 +91,13 @@ object Recommender {
             val arriveSec = (remainSec * t).toLong()
 
             for (menu in store.menus) {
-                if (menu.cookMin * 60L > arriveSec) continue        // ④ 도착 전 조리 불가 → 제외
                 val matches = menu.tags.count { it in wantedTags }
                 if (wantedTags.isNotEmpty() && matches == 0) continue // ⑤
 
-                // 점수: 원하는 맛이 많이 맞을수록 ↑, 경로에서 멀수록 ↓
-                val score = matches * 10.0 - detour / 100.0
+                // ④ 도착 전에 조리가 안 끝나도 주문은 가능 (매장에서 기다림)
+                val waitMin = (menu.cookMin * 60L - arriveSec).coerceAtLeast(0) / 60.0
+                // 점수: 원하는 맛이 많이 맞을수록 ↑, 매장에서 기다릴수록·경로에서 멀수록 ↓
+                val score = matches * 10.0 - waitMin - detour / 100.0
                 results += Recommendation(store, menu, detour.roundToInt(), arriveSec, score)
             }
         }
