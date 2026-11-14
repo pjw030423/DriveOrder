@@ -20,3 +20,31 @@ object PickupWaypoint {
     fun isSamePlace(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Boolean =
         Recommender.distanceM(lat1, lng1, lat2, lng2) <= MATCH_RADIUS_M
 }
+
+/** 픽업 매장 여러 곳을 들르는 순서 (순수 로직) */
+object PickupRoute {
+
+    /** 내비 경유지는 최대 2곳 (WaypointIndex.FIRST, SECOND) */
+    const val MAX_WAYPOINTS = 2
+
+    /**
+     * 가까운 곳부터: 현재 위치에서 가장 가까운 매장 → 그 매장에서 가장 가까운 매장 → … (탐욕법).
+     * 매장이 3곳 이하라 이 정도로 충분함.
+     */
+    fun <T> nearestFirst(lat: Double, lng: Double, items: List<T>, pos: (T) -> Pair<Double, Double>): List<T> {
+        val left = items.toMutableList()
+        val out = mutableListOf<T>()
+        var cur = lat to lng
+        while (left.isNotEmpty()) {
+            val next = left.minBy { val (a, b) = pos(it); Recommender.distanceM(cur.first, cur.second, a, b) }
+            out += next
+            left.remove(next)
+            cur = pos(next)
+        }
+        return out
+    }
+
+    /** 더 받을 수 있는 픽업 매장 수. 내 목적지가 있으면 경유지 2곳, 없으면 경유지 2곳 + 마지막 매장을 목적지로 */
+    fun slotsLeft(stores: Int, hasOwnDestination: Boolean): Int =
+        (if (hasOwnDestination) MAX_WAYPOINTS else MAX_WAYPOINTS + 1) - stores
+}

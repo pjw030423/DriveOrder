@@ -48,6 +48,7 @@
 | | 내비에 경로가 **있을 때** | 경로가 **없을 때** |
 |---|---|---|
 | 🛍️ 픽업 | 가는 **경로**에서 1km 이내 매장 → 매장을 **경유지로 추가**하고 주문 | **현재 위치** 5km 이내 매장(도착 후 대기가 짧은 순) → **매장으로 경로 조회** → 내비 ETA가 오면 주문 |
+| 🛍️ 픽업 여러 곳 | 매장들을 **가까운 곳부터** 경유지로 넣고 목적지는 그대로 (내비 경유지 한도 2곳) | 가까운 곳부터 들르고 **마지막 매장이 목적지** (최대 3곳) |
 | 🛵 배달 | 내비 **목적지** 3km 이내 매장 → 경로는 그대로 두고 주문 | 고른 **장소** 3km 이내 매장 → **그 장소로 경로 조회** → 내비 ETA가 오면 주문 |
 
 경로가 없을 때 후보를 고르는 단계에서는 직선거리 × 1.3 ÷ 36km/h로 도착 시간을 어림하고, 실제 주문은 경로 조회 뒤 **내비 ETA**로 합니다.
@@ -69,7 +70,7 @@
 | SDK | 쓰는 기능 | DriveOrder에서의 역할 |
 |---|---|---|
 | **NaviHelper** 3.0.5 | `getDestinationInfo`, `getCurrentLocationInfo` | 목적지 ETA·현재 위치 → 경로 위 매장 추천 |
-| | `addWaypoint`, `getWaypointInfo`, `onWayPointArrived` | (픽업) 주문 매장을 경유지로 추가, **경유지까지 남은 시간으로 전송 시각 계산** |
+| | `requestRouteWithWaypoints`, `getWaypointInfo`, `onWayPointArrived` | (픽업) 주문 매장들을 **가까운 곳부터** 경유지로 넣어 경로를 다시 요청, **경유지마다 남은 시간으로 전송 시각 계산** |
 | | `getDestinationInfo` 목적지 이름·좌표·ETA | (배달) 목적지 근처 매장 추천, **목적지 도착 시각으로 전송 시각 계산**, 배달 받을 곳 |
 | | `requestRoute`, `onRouteStarted` | 경로가 없을 때 고른 매장(픽업)·장소(배달)로 **경로 조회 후 그 ETA로 주문** |
 | | `getBookmarkInfo`, `getRecentDestinationInfo` | "어디로 배달할까요?"에 답할 장소 후보 (집·회사·최근 목적지) |
@@ -177,7 +178,7 @@ Firestore에 매장이 없으면 첫 주문 때 앱이 가상 매장 25곳(`stor
 
 ## 테스트
 
-SDK와 무관한 핵심 로직은 순수 Kotlin으로 분리해 PC에서 단위 테스트합니다 (75개).
+SDK와 무관한 핵심 로직은 순수 Kotlin으로 분리해 PC에서 단위 테스트합니다 (80개).
 
 ```bash
 ./gradlew testDebugUnitTest
@@ -190,6 +191,7 @@ SDK와 무관한 핵심 로직은 순수 Kotlin으로 분리해 PC에서 단위 
 | `VoiceDialogTest` | 음성 대화 흐름(음식 → 픽업/배달 → 배달 장소 → 제안 → 네/아니요), 경로 유무에 따른 분기, 장소 인식(집·이름), 비슷한 말(통닭·떡뽁이·아메리카노), "말고"·"방금 거"·"처음 거"·"더 싼 거", 원하는 음식이 없을 때 대안 제안, 무응답·못 알아들음 2회 종료, 취소 |
 | `SeedCoverageTest` | 시연 데이터로 음식 종류·취향 태그마다 4가지 상황(경로 유무 × 픽업/배달)에서 후보가 있는지 (10·12·15·19·23시) |
 | `PickupWaypointTest` | 내비 경유지 목록에서 주문 매장 찾기 |
+| `PickupRouteTest` | 픽업 매장 여러 곳을 가까운 곳부터 들르는 순서, 경유지 한도(2곳) |
 | `DemoDriveTest` | 데모 주행 중 전송 시각 고정, 정체 시 연기 |
 
 에뮬레이터에서 확인한 것: 내비 경로·ETA 수신, 경유지 추가와 경유지 ETA 수신, TTS 재생과 STT 듣기 시작,
@@ -205,7 +207,7 @@ app/src/main/java/com/example/myapplication/
 ├── OrderScheduler.kt        전송 시각 계산·재계산
 ├── Order.kt                 주문 데이터와 상태
 ├── VoiceDialog.kt           음성 대화 흐름과 문장 해석
-├── PickupWaypoint.kt        경유지 ↔ 주문 매장 매칭
+├── PickupWaypoint.kt        경유지 ↔ 주문 매장 매칭, 여러 매장을 가까운 곳부터 들르는 순서
 ├── OrderTrackingService.kt  주문 진행 중 백그라운드 동작 유지 (포그라운드 서비스)
 ├── DemoDrive.kt             데모용 가상 주행
 ├── FirestoreRest.kt         Firestore REST 클라이언트

@@ -22,7 +22,11 @@ class VoiceDialog(
     /** 내비에 목적지(경로)가 설정되어 있는지 */
     private val hasDestination: () -> Boolean = { true },
     /** 배달 장소로 고를 수 있는 곳들 */
-    private val places: () -> List<Place> = { emptyList() }
+    private val places: () -> List<Place> = { emptyList() },
+    /** 픽업 매장을 몇 곳 더 넣을 수 있는지 (내비 경유지 한도) */
+    private val pickupSlots: () -> Int = { Int.MAX_VALUE },
+    /** 이미 들를 픽업 매장이 있는지 (있으면 가까운 곳부터 들르도록 경로를 다시 짬) */
+    private val pickupsPending: () -> Boolean = { false }
 ) {
     /** 앱이 할 일: say를 읽고, listen이면 다시 듣고, order가 있으면 주문 (place가 있으면 그곳으로 배달) */
     data class Reply(val say: String, val listen: Boolean, val order: Recommendation? = null, val place: Place? = null)
@@ -138,6 +142,11 @@ class VoiceDialog(
             state = State.AskingMode
             return Reply(MODE_QUESTION, listen = true)
         }
+        if (mode == VoiceParser.Mode.PICKUP && pickupSlots() <= 0) {
+            state = State.AskingMode
+            mode = null
+            return miss("들를 매장이 이미 가득 차서 픽업은 더 추가할 수 없어요. 배달로 하시려면 배달이라고 말씀해 주세요.")
+        }
         if (delivery && place == null && !hasDestination()) {
             state = State.AskingPlace
             return Reply(placeQuestion(), listen = true)
@@ -221,6 +230,8 @@ class VoiceDialog(
                 "${rec.menu.name} 배달 주문할게요. ${p.name}까지 경로를 안내하고, 도착 시간에 맞춰 ${store}에서 보내 드릴게요."
             rec.delivery ->
                 "${rec.menu.name} 배달 주문할게요. 목적지에 도착하실 때 맞춰 ${store}에서 보내 드릴게요."
+            pickupsPending() ->
+                "${rec.menu.name} 주문할게요. 가까운 매장부터 들르도록 ${withEulReul(store)} 경로에 넣고, 도착 시간에 맞춰 조리를 요청할게요."
             hasDestination() ->
                 "${rec.menu.name} 주문할게요. ${withEulReul(store)} 경유지로 추가하고, 도착 시간에 맞춰 조리를 요청할게요."
             else ->

@@ -37,6 +37,7 @@ import ai.pleos.playground.navi.data.CurrentLocationInfo
 import ai.pleos.playground.navi.data.RecentDestinationInfo
 import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.RequestWaypointInfo
+import ai.pleos.playground.navi.data.RouteWithWaypointsRequest
 import ai.pleos.playground.navi.data.RouteInfo
 import ai.pleos.playground.navi.data.RouteStartInfo
 import ai.pleos.playground.navi.data.WaypointArrivedInfo
@@ -78,11 +79,12 @@ class MainActivity : ComponentActivity() {
 
     private var status by mutableStateOf("NaviHelper 연결 중...")
     private var plan by mutableStateOf("")
-    private var order by mutableStateOf<Order?>(null)   // 5단계: 진행 중인 주문
+    private var orders by mutableStateOf<List<Order>>(emptyList())   // 5단계: 진행 중인 주문들 (픽업 여러 곳 + 배달)
     private var orderText by mutableStateOf("")
     private var waypointAdded = false                 // 6단계: 매장을 내비 경유지로 추가했는지
-    private var storeIsDestination = false            // 경로가 없어 매장 자체로 길 안내를 시작했는지 (주문을 닫으면 안내도 끝냄)
-    @Volatile private var waypointRemainSec: Long? = null  // 6단계: 내비가 준 매장(경유지)까지 남은 시간
+    private var storeIsDestination = false            // 내 목적지 없이 매장 자체로 길 안내 중인지 (주문을 닫으면 안내도 끝냄)
+    private var ownDest: Place? = null                // 픽업 경유지를 넣기 전 운전자의 원래 목적지 (경로를 다시 짤 때 유지)
+    private val wpEtaOrders = mutableSetOf<String>()  // 6단계: 내비가 경유지 ETA를 준 주문 (그 전엔 위치 비율로 추정)
 
     // 7단계: 음성 주문
     private var tts: TextToSpeech? = null
@@ -93,7 +95,9 @@ class MainActivity : ComponentActivity() {
     private var listenTimeout: Job? = null            // 듣는 중 무응답 타이머 (STT는 무음이면 끝나지 않음)
     private val voiceDialog = VoiceDialog(
         recommend = { tags, delivery, place -> computeRecs(tags, limit = 100, delivery = delivery, place = place) },
-        hasDestination = { hasRoute() },
+        hasDestination = { userRoute() },
+        pickupSlots = { PickupRoute.slotsLeft(pickupStores().size, ownDest != null || userRoute()) },
+        pickupsPending = { pickupStores().isNotEmpty() },
         // 질문에서 앞의 3곳만 읽음: 집·회사 → 데모 장소(강남역) → 최근 목적지
         // 최근 목적지 중 가상 매장(픽업하러 갔던 곳)은 배달 장소에서 뺌
         places = {
@@ -184,8 +188,13 @@ class MainActivity : ComponentActivity() {
                     placeOrder(rec.copy(arriveSec = remain), deliveryTo = pendingTo, viaWaypoint = false)
                     return
                 }
-                if (order?.isDelivery == true) rescheduleOrder(remain)
-                else if (waypointRemainSec == null) rescheduleOrder(estimateStoreRemain(remain))
+                for (o in orders) when {
+                    o.isDelivery -> if (!storeIsDestination) rescheduleOrder(o, remain)
+                    // 매장이 내비 목적지면 목적지 ETA가 곧 매장 ETA
+                    storeIsDestination && PickupWaypoint.matches(destName, destLat ?: 0.0, destLng ?: 0.0, o.storeName, o.storeLat, o.storeLng) ->
+                        rescheduleOrder(o, remain)
+                    o.id !in wpEtaOrders -> rescheduleOrder(o, estimateStoreRemain(o, remain))
+                }
             }
         }
 
@@ -221,16 +230,16 @@ class MainActivity : ComponentActivity() {
 
         // 6단계: 경유지 목록 수신 → 주문 매장과 같은 위치의 경유지 ETA로 전송 시각 재계산
         override fun onWayPointInfo(waypointInfoList: List<WaypointInfo>) {
-            val current = order?.takeUnless { it.isDelivery } ?: return   // 배달은 경유지 없음
-            val wp = waypointInfoList.firstOrNull {
-                PickupWaypoint.matches(it.name, it.latitude, it.longitude, current.storeName, current.storeLat, current.storeLng)
+            Log.d(TAG, "경유지 ${waypointInfoList.size}개: ${waypointInfoList.joinToString { "${it.name} ${it.remainTime}초" }}")
+            for (o in orders.filter { !it.isDelivery }) {   // 배달은 경유지 없음
+                val wp = waypointInfoList.firstOrNull {
+                    PickupWaypoint.matches(it.name, it.latitude, it.longitude, o.storeName, o.storeLat, o.storeLng)
+                } ?: continue
+                // 처음 받은 경유지 ETA부터 데모 주행을 다시 시작 (그 전 값은 위치 비율로 추정한 값이라 부정확)
+                if (wpEtaOrders.isEmpty()) demoDrive.reset()
+                wpEtaOrders += o.id
+                rescheduleOrder(o, wp.remainTime.toLong())
             }
-            Log.d(TAG, "경유지 ${waypointInfoList.size}개, 매장 경유지: ${wp?.remainTime}초 / ${wp?.remainDistance}m")
-            if (wp == null) return
-            // 처음 받은 경유지 ETA부터 데모 주행을 다시 시작 (그 전 값은 위치 비율로 추정한 값이라 부정확)
-            if (waypointRemainSec == null) demoDrive.reset()
-            waypointRemainSec = wp.remainTime.toLong()
-            rescheduleOrder(wp.remainTime.toLong())
         }
 
         // 6단계: 매장(경유지) 도착
@@ -304,7 +313,7 @@ class MainActivity : ComponentActivity() {
                     if (voiceLog.isNotEmpty()) Text(voiceLog, fontSize = 22.sp)
                     Spacer(Modifier.height(16.dp))
                     Text(orderText, fontSize = 22.sp)
-                    if (order != null) {
+                    if (orders.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
                         Button(onClick = { clearOrder("") }) { Text("주문 화면 닫기") }
                     }
@@ -343,6 +352,12 @@ class MainActivity : ComponentActivity() {
     /** 내비에 경로(목적지 + 남은 시간)가 있는지 */
     private fun hasRoute() = lastRemainSec != null && destLat != null && destLng != null
 
+    /** 운전자가 직접 정한 목적지로 가는 중인지 (픽업 매장으로 가는 안내는 제외) */
+    private fun userRoute() = hasRoute() && !storeIsDestination
+
+    /** 들러야 할 픽업 매장 (같은 매장 주문은 한 곳으로) */
+    private fun pickupStores() = orders.filter { !it.isDelivery && it.status != Order.STATUS_PICKED_UP }.distinctBy { it.storeId }
+
     /**
      * 추천 (매장 목록은 미리 불러와 있어야 함). 계산할 수 없으면 null
      *  - 픽업: 경로가 있으면 가는 길, 없으면 현재 위치 근처
@@ -361,7 +376,8 @@ class MainActivity : ComponentActivity() {
         val remain = lastRemainSec
         val dLat = destLat
         val dLng = destLng
-        if (remain == null || dLat == null || dLng == null) {
+        // 매장으로 가는 안내 중이면 "가는 길"이 아니라 근처에서 찾음 (가까운 곳부터 들르도록 경로를 다시 짬)
+        if (remain == null || dLat == null || dLng == null || storeIsDestination) {
             return if (delivery) null else Recommender.recommendNearby(stores, cLat, cLng, hour, tags, limit)
         }
         if (delivery) return Recommender.recommendDelivery(stores, dLat, dLng, remain, hour, tags, limit)
@@ -523,7 +539,11 @@ class MainActivity : ComponentActivity() {
      *  - 경로가 없으면 먼저 경로 조회 (픽업 → 매장, 배달 → 고른 장소). 내비 ETA가 오면 onDestinationInfo에서 주문
      */
     private fun startOrder(rec: Recommendation, place: Place?) {
-        if (hasRoute() && place == null) { placeOrder(rec); return }
+        // 이미 들를 매장이 있으면 경로를 새로 찾지 않고 그 경로에 추가 (가까운 곳부터 다시 짬)
+        if (pickupStores().isNotEmpty() && (!rec.delivery || place != null)) {
+            placeOrder(rec, deliveryTo = place?.name ?: destName); return
+        }
+        if (userRoute() && place == null) { placeOrder(rec); return }
         val (name, lat, lng) = if (rec.delivery) {
             val p = place ?: return   // 배달인데 장소도 경로도 없음 (대화에서 막힘)
             Triple(p.name, p.lat, p.lng)
@@ -555,12 +575,15 @@ class MainActivity : ComponentActivity() {
             val code = FirestoreRest.putDocument("orders", newOrder.id, newOrder.toJson())
             check(code in 200..299) { "HTTP $code" }
             Log.d(TAG, "주문 생성 ${newOrder.id} (${newOrder.type}): 도착 ${rec.arriveSec}초 뒤, 조리 ${rec.menu.cookMin}분, 배달 ${rec.deliveryMin}분")
-            order = newOrder
-            waypointRemainSec = null
-            demoDrive.reset()
-            if (!newOrder.isDelivery && viaWaypoint) addStoreWaypoint(newOrder)   // 배달은 경로를 바꾸지 않음
-            storeIsDestination = !newOrder.isDelivery && !viaWaypoint
-            val what = if (newOrder.isDelivery) "목적지 도착에 맞춰 배달 요청 중" else "도착 시간에 맞춰 주문 전달 중"
+            if (orders.isEmpty()) demoDrive.reset()
+            // 경로를 바꾸기 전에 운전자의 원래 목적지를 기억 (매장 경유지를 넣고 다시 짜도 목적지는 유지)
+            if (ownDest == null && viaWaypoint && userRoute()) ownDest = Place(destName, destLat!!, destLng!!)
+            orders = orders + newOrder
+            if (!newOrder.isDelivery) {   // 배달은 경로를 바꾸지 않음
+                if (viaWaypoint) rebuildRoute() else storeIsDestination = true
+            }
+            val what = if (orders.size > 1) "주문 ${orders.size}건 진행 중"
+                else if (newOrder.isDelivery) "목적지 도착에 맞춰 배달 요청 중" else "도착 시간에 맞춰 주문 전달 중"
             OrderTrackingService.start(this@MainActivity, "${newOrder.storeName} · ${newOrder.menuName}: $what")
             renderOrder()
         } catch (e: Exception) {
@@ -569,26 +592,46 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // 6단계: 주문 매장을 내비 경유지로 추가 → 이후 내비가 매장까지 남은 시간을 직접 알려 줌
-    private fun addStoreWaypoint(o: Order) {
-        naviHelper.addWaypoint(
+    /**
+     * 6단계: 픽업 매장들을 가까운 곳부터 들르도록 경로를 다시 요청 → 이후 내비가 매장마다 남은 시간을 알려 줌.
+     *  - 내 목적지가 있으면: 목적지는 그대로, 매장들은 경유지 (최대 2곳)
+     *  - 없으면: 가장 마지막에 들를 매장이 목적지, 나머지는 경유지
+     */
+    private fun rebuildRoute() {
+        val stops = PickupRoute.nearestFirst(curLat ?: DEFAULT_LAT, curLng ?: DEFAULT_LNG, pickupStores()) { it.storeLat to it.storeLng }
+        if (stops.isEmpty()) return
+        val own = ownDest
+        val dest = if (own != null) routeInfo(own.name, own.lat, own.lng)
+            else stops.last().let { routeInfo(it.storeName, it.storeLat, it.storeLng) }
+        val via = (if (own != null) stops else stops.dropLast(1)).take(PickupRoute.MAX_WAYPOINTS)
+        val indexes = listOf(WaypointIndex.FIRST, WaypointIndex.SECOND)
+        val waypoints = via.mapIndexed { i, o ->
             RequestWaypointInfo(
                 latitude = o.storeLat,
                 longitude = o.storeLng,
                 poiName = o.storeName,
-                waypointIndex = WaypointIndex.FIRST,
+                waypointIndex = indexes[i],
                 poiId = "",          // 가상 매장이라 내비 POI ID 없음
                 address = "",
                 poiSubId = "0"
             )
-        )
-        waypointAdded = true
-        Log.d(TAG, "경유지 추가 요청: ${o.storeName} (${o.storeLat}, ${o.storeLng})")
+        }
+        lastRemain = null
+        wpEtaOrders.clear()   // 순서가 바뀌면 경유지 ETA도 바뀜
+        naviHelper.requestRouteWithWaypoints(RouteWithWaypointsRequest(dest, waypoints))
+        waypointAdded = waypoints.isNotEmpty()
+        storeIsDestination = own == null
+        Log.d(TAG, "경로 다시 요청: ${(via.map { it.storeName } + dest.poiName).joinToString(" → ")}")
     }
 
+    private fun routeInfo(name: String, lat: Double, lng: Double) = RouteInfo(
+        latitude = lat, longitude = lng,
+        displayLongitude = null, displayLatitude = null,
+        poiName = name, poiId = "", poiSubId = "0", address = ""
+    )
+
     // 경유지 ETA를 받기 전: 목적지 ETA × 매장의 경로상 위치 비율로 매장까지 남은 시간 추정
-    private fun estimateStoreRemain(destRemainSec: Long): Long? {
-        val current = order ?: return null
+    private fun estimateStoreRemain(current: Order, destRemainSec: Long): Long? {
         val dLat = destLat ?: return null
         val dLng = destLng ?: return null
         val (_, t) = Recommender.distanceToSegment(
@@ -598,9 +641,8 @@ class MainActivity : ComponentActivity() {
     }
 
     // 5단계: 주행 중 매장까지 남은 시간으로 도착·전송 시각을 다시 계산해 서버에 반영 (정체 시 전송 연기)
-    private fun rescheduleOrder(storeRemainSec: Long?) {
+    private fun rescheduleOrder(current: Order, storeRemainSec: Long?) {
         if (storeRemainSec == null) return
-        val current = order ?: return
         val now = System.currentTimeMillis()
         val remain = demoDrive.remain(storeRemainSec, now)   // 데모 주행이 켜져 있으면 가상 주행 기준
         val updated = OrderScheduler.reschedule(current, now, remain) ?: return
@@ -611,7 +653,7 @@ class MainActivity : ComponentActivity() {
                     JSONObject().put("etaAt", updated.etaAt).put("sendAt", updated.sendAt)
                 )
                 Log.d(TAG, "주문 재계산: etaAt=${updated.etaAt}, sendAt=${updated.sendAt}")
-                if (order?.id == updated.id) order = updated.copy(status = order!!.status)
+                orders = orders.map { if (it.id == updated.id) updated.copy(status = it.status) else it }
             } catch (e: Exception) {
                 Log.e(TAG, "재계산 반영 실패", e)
             }
@@ -620,16 +662,21 @@ class MainActivity : ComponentActivity() {
 
     // 5단계: 매장 웹이 바꾼 상태(조리 중·완료)를 읽어 오고, 전송 시각이 되면 'sent'로 표시
     private suspend fun syncOrderStatus() {
-        val current = order ?: return
+        for (current in orders) syncOne(current)
+        if (orders.isNotEmpty() && orders.all { it.status == Order.STATUS_PICKED_UP }) OrderTrackingService.stop(this)   // 모두 완료 → 서비스 종료
+        renderOrder()
+    }
+
+    private suspend fun syncOne(current: Order) {
         // 픽업·배달 완료 후에는 더 바뀔 상태가 없음 → 5초마다 서버 조회하지 않음
         if (current.status == Order.STATUS_PICKED_UP) return
         try {
             val now = System.currentTimeMillis()
             val doc = FirestoreRest.getDocument("orders", current.id)
             if (doc == null) {
-                // 서버에서 주문이 삭제됨(매장 취소·테스트 정리 등) → 차에서도 주문을 내려놓음
+                // 서버에서 주문이 삭제됨(매장 취소·테스트 정리 등) → 차에서도 그 주문을 내려놓음
                 Log.d(TAG, "주문이 서버에서 삭제됨: ${current.id}")
-                clearOrder("주문이 취소되었어요 (매장에서 삭제됨)")
+                removeOrder(current)
                 return
             }
             var status = doc.optString("status", current.status)
@@ -639,17 +686,25 @@ class MainActivity : ComponentActivity() {
                 Log.d(TAG, "🔔 매장에 주문 전송: ${current.id}")
             }
             if (status != current.status) Log.d(TAG, "주문 상태 변경: ${current.status} → $status")
-            if (order?.id == current.id) order = order!!.copy(status = status)
-            if (status == Order.STATUS_PICKED_UP) OrderTrackingService.stop(this)   // 픽업·배달 완료 → 서비스 종료
+            orders = orders.map { if (it.id == current.id) it.copy(status = status) else it }
         } catch (e: Exception) {
             Log.e(TAG, "주문 상태 조회 실패", e)
         }
-        renderOrder()
+    }
+
+    /** 주문 1건만 내려놓음: 남은 픽업 매장으로 경로를 다시 짬 (남은 게 없으면 전부 정리) */
+    private fun removeOrder(o: Order) {
+        if (orders.size <= 1) { clearOrder("주문이 취소되었어요 (매장에서 삭제됨)"); return }
+        orders = orders.filter { it.id != o.id }
+        if (!o.isDelivery) {
+            if (pickupStores().isNotEmpty()) rebuildRoute()
+            else if (waypointAdded) { naviHelper.removeWaypoint(WaypointIndex.ALL); waypointAdded = false }
+        }
     }
 
     /** 진행 중인 주문을 내려놓음: 경유지 삭제, 서비스 종료, 안내 문구 표시 */
     private fun clearOrder(message: String) {
-        if (waypointAdded) naviHelper.removeWaypoint(WaypointIndex.FIRST)
+        if (waypointAdded && !storeIsDestination) naviHelper.removeWaypoint(WaypointIndex.ALL)
         waypointAdded = false
         // 매장으로 가던 안내를 남겨 두면 다음 주문에서 그 매장을 목적지로 착각함 → 안내도 끝냄
         if (storeIsDestination) {
@@ -661,8 +716,9 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch { delay(1500); naviHelper.getDestinationInfo() }   // 화면의 목적지 표시 갱신
         }
         storeIsDestination = false
-        waypointRemainSec = null
-        order = null
+        ownDest = null
+        wpEtaOrders.clear()
+        orders = emptyList()
         OrderTrackingService.stop(this)
         orderText = message
     }
@@ -683,7 +739,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderOrder() {
-        val o = order ?: return
+        if (orders.isEmpty()) return
+        val stops = PickupRoute.nearestFirst(curLat ?: DEFAULT_LAT, curLng ?: DEFAULT_LNG, pickupStores()) { it.storeLat to it.storeLng }
+        val route = if (stops.size > 1) "🧭 들르는 순서: ${(stops.map { it.storeName } + listOfNotNull(ownDest?.name)).joinToString(" → ")}\n\n" else ""
+        orderText = route + orders.joinToString("\n\n") { orderLines(it) }
+    }
+
+    private fun orderLines(o: Order): String {
         val now = System.currentTimeMillis()
         val sendIn = ((o.sendAt - now) / 1000).coerceAtLeast(0)
         val etaIn = ((o.etaAt - now) / 1000).coerceAtLeast(0)
@@ -694,7 +756,7 @@ class MainActivity : ComponentActivity() {
             "목적지 도착 약 ${etaIn / 60}분 ${etaIn % 60}초 뒤 (조리 ${o.cookMin}분 + 배달 ${o.deliveryMin}분)"
         else
             "매장 도착 약 ${etaIn / 60}분 ${etaIn % 60}초 뒤 (조리 ${o.cookMin}분)"
-        orderText = "🧾 $kind · ${o.storeName} · ${o.menuName} ${"%,d".format(o.price)}원\n" +
+        return "🧾 $kind · ${o.storeName} · ${o.menuName} ${"%,d".format(o.price)}원\n" +
             "상태: ${Order.statusLabel(o.status, o.isDelivery)}\n" +
             "$sendLine · $etaLine"
     }

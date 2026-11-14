@@ -276,6 +276,25 @@ class VoiceDialogTest {
         assertEquals(VoiceParser.Answer.NO, VoiceParser.answer("그건 별론데"))
     }
 
+    @Test
+    fun 들를_매장이_가득_차면_픽업_대신_배달을_권한다() {
+        val d = VoiceDialog(::fakeRecommend, pickupSlots = { 0 })
+        d.start()
+        val r = d.handle("치킨 픽업")
+        assertNull(r.order)
+        assertTrue(r.say, r.say.contains("픽업은 더 추가할 수 없어요"))
+        assertTrue(d.handle("배달").say.contains("배달로 주문할까요"))
+    }
+
+    @Test
+    fun 이미_픽업이_있으면_가까운_곳부터_들른다고_안내() {
+        val d = VoiceDialog(::fakeRecommend, pickupsPending = { true })
+        d.start()
+        d.handle("국물 픽업")
+        val done = d.handle("네")
+        assertTrue(done.say, done.say.contains("가까운 매장부터"))
+    }
+
     // ---------- 종료·무응답 ----------
 
     @Test
