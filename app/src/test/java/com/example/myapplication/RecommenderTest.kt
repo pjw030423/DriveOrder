@@ -89,8 +89,17 @@ class RecommenderTest {
         val chicken = delivery(remainSec = 1620, hour = 18).first { it.store.id == "store_005" }
         assertTrue(chicken.prepSec <= 1620)
         assertEquals(chicken.prepSec, (20 + chicken.deliveryMin) * 60L)
-        // 목적지까지 20분이면 조리 20분 + 배달 시간을 못 맞춤 → 제외
-        assertFalse(delivery(remainSec = 1200, hour = 18).any { it.store.id == "store_005" })
+    }
+
+    @Test
+    fun 배달이_도착보다_늦어도_제외하지_않고_뒤로_미룬다() {
+        // 목적지까지 20분이면 조리 20분 + 배달 시간을 못 맞춤 → 그래도 주문 가능 (도착 후 기다림)
+        val r = delivery(remainSec = 1200, hour = 18)
+        val late = r.first { it.store.id == "store_005" }
+        assertTrue(late.slackSec < 0)
+        // 같은 매장이면 늦는 만큼 점수가 낮음
+        val onTime = delivery(remainSec = 3600, hour = 18).first { it.store.id == "store_005" }
+        assertTrue(late.score < onTime.score)
     }
 
     @Test

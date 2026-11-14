@@ -221,6 +221,45 @@ class VoiceDialogTest {
         assertTrue(d.handle("배달").say.contains("후라이드 치킨"))   // 음식은 기억하고 방식만 바꿈
     }
 
+    @Test
+    fun 음식을_못_알아들으면_방식을_묻지_않고_음식을_다시_묻는다() {
+        val d = dialog()
+        d.start()
+        val again = d.handle("음…")
+        assertTrue(again.listen)
+        assertTrue(again.say.contains("무엇을 드시고 싶으세요"))
+        assertFalse(again.say.contains(VoiceDialog.MODE_QUESTION))
+        // 두 번 연속 못 알아들으면 종료
+        assertFalse(d.handle("흠").listen)
+        assertFalse(d.isActive)
+    }
+
+    @Test
+    fun 아무거나라고_하면_방식을_묻는다() {
+        val d = dialog()
+        d.start()
+        assertEquals(VoiceDialog.MODE_QUESTION, d.handle("아무거나 괜찮아").say)
+    }
+
+    @Test
+    fun 처음에_방식만_말하면_받아_두고_음식을_묻는다() {
+        val d = dialog()
+        d.start()
+        val r = d.handle("배달로 할래")
+        assertTrue(r.say.contains("무엇을 드시고 싶으세요"))
+        assertTrue(d.handle("치킨").say.contains("배달로 주문할까요"))   // 방식은 다시 묻지 않음
+    }
+
+    @Test
+    fun 배달이_도착보다_늦어도_알려_주고_주문할_수_있다() {
+        val late = Recommendation(chicken, chicken.menus[0], 600, 900, 0.0, delivery = true, deliveryMin = 5)  // 15분 vs 준비 25분
+        val d = VoiceDialog({ _, delivery, _ -> if (delivery) listOf(late) else emptyList() })
+        d.start()
+        val p = d.handle("치킨 배달")
+        assertTrue(p.say, p.say.contains("그 뒤 10분쯤 지나 배달돼요"))
+        assertTrue(d.handle("네").order!!.delivery)
+    }
+
     // ---------- 종료·무응답 ----------
 
     @Test

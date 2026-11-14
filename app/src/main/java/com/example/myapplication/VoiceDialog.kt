@@ -6,10 +6,11 @@ data class Place(val name: String, val lat: Double, val lng: Double, val aliases
 /**
  * 음성 주문 대화 흐름 (SDK와 무관한 순수 로직 → 단위 테스트 가능).
  *
- *  ① 무엇을 드시고 싶으세요?        → "국물 있는 거", "치킨", "아무거나"
+ *  ① 무엇을 드시고 싶으세요?        → "국물 있는 거", "치킨", "아무거나" (못 알아들으면 다시 물음)
  *  ② 픽업과 배달 중 어떤 걸로 할까요? → "픽업" / "배달"   (①에서 같이 말했으면 생략)
  *  ③ (배달인데 내비 목적지가 없으면) 어디로 배달할까요? → "집", "강남역" (즐겨찾기·최근 목적지에서 찾음)
  *  ④ "한끼찌개의 김치찌개, 9000원… 주문할까요?" → "네"면 주문 / "아니"면 다음 후보
+ *     (배달이 도착보다 늦으면 몇 분 뒤 오는지 알려 주고 그래도 주문 가능)
  *  ⑤ 주문: 경로가 있으면 바로(픽업은 경유지 추가), 없으면 MainActivity가 경로를 조회한 뒤 그 ETA로 주문
  *
  * 추천 범위: 픽업은 경로가 있으면 가는 길, 없으면 현재 위치 근처 / 배달은 내비 목적지 또는 ③에서 고른 곳 근처.
@@ -52,7 +53,7 @@ class VoiceDialog(
         place = null
         tags = emptySet()
         food = null
-        return Reply("무엇을 드시고 싶으세요? 치킨, 국밥, 커피처럼 말씀해 주세요.", listen = true)
+        return Reply(FOOD_QUESTION, listen = true)
     }
 
     fun cancel(): Reply {
@@ -86,6 +87,16 @@ class VoiceDialog(
 
     // ① 음식 (같은 문장에 방식·장소가 있으면 함께 받음: "배달로 치킨", "집으로 치킨 보내 줘")
     private fun onFood(text: String): Reply {
+        // 음식을 못 알아들었으면 방식으로 넘어가지 않고 다시 물음 ("배달로"만 말했으면 방식은 받아 둠)
+        if (!saysFood(text) && !VoiceParser.isAnything(text)) {
+            val m = VoiceParser.mode(text) ?: return miss("잘 못 들었어요. $FOOD_QUESTION 아무거나라고 하셔도 돼요.")
+            mode = m
+            takeModeAndPlace(text)
+            misses = 0
+            // 이미 음식을 들었으면 (찾는 게 없어 방식만 바꾸는 경우) 바로 다시 찾음
+            if (food != null || tags.isNotEmpty()) return next()
+            return Reply("${if (m == VoiceParser.Mode.DELIVERY) "배달로" else "픽업으로"} 할게요. 무엇을 드시고 싶으세요?", listen = true)
+        }
         tags = VoiceParser.tags(text)
         food = VoiceParser.food(text)
         takeModeAndPlace(text)
@@ -149,14 +160,14 @@ class VoiceDialog(
         // 원하는 게 없으면 끝내지 않고 대신 고를 만한 메뉴를 제안
         val alt = (if (f != null) recs else emptyList()).ifEmpty { find(emptySet()) ?: emptyList() }
         val what = f?.name ?: "말씀하신 메뉴"
-        val area = if (delivery) "$where 근처에 도착 전까지 배달되는 $what" else if (hasDestination()) "가는 길에 $what" else "근처에 $what"
+        val area = if (delivery) "$where 근처에 배달되는 $what" else if (hasDestination()) "가는 길에 $what" else "근처에 $what"
         if (alt.isNotEmpty()) {
             misses = 0
             return propose(alt, 0, prefix = "${withIGa(area)} 없어요. 대신 ")
         }
         state = State.AskingFood   // 방식·장소는 유지하고 음식만 다시
         return miss(
-            if (delivery) "$where 근처에 도착 전까지 배달되는 메뉴가 없어요. 다른 걸 말씀하시거나 픽업이라고 말씀해 주세요."
+            if (delivery) "$where 근처에 배달되는 메뉴가 없어요. 다른 걸 말씀하시거나 픽업이라고 말씀해 주세요."
             else "근처에 받을 수 있는 메뉴가 없어요. 다른 걸 말씀하시거나 배달이라고 말씀해 주세요."
         )
     }
@@ -217,7 +228,8 @@ class VoiceDialog(
         val r = recs[index]
         val min = r.arriveSec / 60
         val detail = when {
-            r.delivery -> "약 ${min}분 뒤 ${placeName()}에 도착하실 때 맞춰 배달돼요. 배달로 주문할까요?"
+            r.delivery && r.slackSec >= 0 -> "약 ${min}분 뒤 ${placeName()}에 도착하실 때 맞춰 배달돼요. 배달로 주문할까요?"
+            r.delivery -> "약 ${min}분 뒤 ${placeName()}에 도착하시고, 그 뒤 ${(-r.slackSec + 59) / 60}분쯤 지나 배달돼요. 배달로 주문할까요?"
             r.slackSec >= 0 -> "약 ${min}분 뒤 도착하면 바로 받을 수 있어요. 주문할까요?"
             else -> "약 ${min}분 거리이고, 도착 후 ${(-r.slackSec + 59) / 60}분쯤 기다리면 받아요. 주문할까요?"
         }
@@ -247,6 +259,7 @@ class VoiceDialog(
 
     companion object {
         const val MAX_MISSES = 2
+        const val FOOD_QUESTION = "무엇을 드시고 싶으세요? 치킨, 국밥, 커피처럼 말씀해 주세요."
         const val MODE_QUESTION = "들러서 받는 픽업과 배달 중 어떤 걸로 할까요?"
 
         /** 받침 유무에 따라 을/를 ("서초치킨공방을", "테헤란샐러드를") */
@@ -326,6 +339,11 @@ object VoiceParser {
         Food("분식", listOf("분식"), listOf("분식")),
         Food("한식", listOf("한식", "집밥"), listOf("한식")),
     )
+
+    /** "아무거나", "추천해 줘" → 음식을 정하지 않고 아무 메뉴나 */
+    private val ANY_WORDS = listOf("아무거나", "아무 거나", "아무거", "아무 거", "아무꺼", "뭐든", "뭐라도", "추천", "상관없", "상관 없", "알아서", "맛있는")
+
+    fun isAnything(text: String) = ANY_WORDS.any { it in text }
 
     fun isCancel(text: String) = CANCEL_WORDS.any { it in text }
 

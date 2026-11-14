@@ -59,7 +59,7 @@ data class Recommendation(
  * 배달(recommendDelivery)은 ②③④가 바뀜
  *  ② 배달 가능한가        deliveryAvailable
  *  ③ 목적지 근처인가      목적지에서 MAX_DELIVERY_M 이내 (경로와 무관 → 경유지 없음)
- *  ④ 도착 전 받을 수 있나  조리 + 배달 이동 ≤ 목적지 도착까지 걸리는 시간
+ *  ④ 도착 전 받을 수 있나  조리 + 배달 이동 ≤ 목적지 도착까지 걸리는 시간 (넘으면 제외하지 않고 도착 후 기다리는 만큼 순위를 낮춤)
  */
 object Recommender {
 
@@ -136,10 +136,11 @@ object Recommender {
             if (dist > MAX_DELIVERY_M) continue                     // ③
             val deliveryMin = deliveryMinutes(dist)
             for (menu in store.menus) {
-                if ((menu.cookMin + deliveryMin) * 60L > remainSec) continue  // ④
                 val matches = menu.tags.count { it in wantedTags }
                 if (wantedTags.isNotEmpty() && matches == 0) continue          // ⑤
-                val score = matches * 10.0 - dist / 100.0
+                // ④ 도착 전에 못 받는 메뉴도 주문은 가능 (도착 후 기다림) → 기다리는 시간만큼 점수 ↓
+                val waitMin = ((menu.cookMin + deliveryMin) * 60L - remainSec).coerceAtLeast(0) / 60.0
+                val score = matches * 10.0 - waitMin - dist / 100.0
                 results += Recommendation(store, menu, dist.roundToInt(), remainSec, score,
                     delivery = true, deliveryMin = deliveryMin)
             }
