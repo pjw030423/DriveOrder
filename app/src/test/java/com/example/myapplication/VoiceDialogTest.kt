@@ -329,7 +329,7 @@ class VoiceDialogTest {
 
     @Test
     fun 짧은_승낙은_낱말_그대로일_때만() {
-        for (yes in listOf("네", "넵", "응", "예", "콜", "ㅇㅇ", "네 주문해 주세요", "응 좋아", "네네"))
+        for (yes in listOf("네", "넵", "응", "어", "예", "콜", "ㅇㅇ", "네 주문해 주세요", "응 좋아", "네네"))
             assertEquals(yes, VoiceParser.Answer.YES, VoiceParser.answer(yes))
         for (no in listOf("콜라", "예약", "응답", "네가 골라"))
             assertEquals(no, VoiceParser.Answer.UNKNOWN, VoiceParser.answer(no))

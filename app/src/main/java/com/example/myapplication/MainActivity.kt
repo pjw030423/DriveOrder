@@ -645,7 +645,7 @@ class MainActivity : ComponentActivity() {
     private fun rescheduleOrder(current: Order, storeRemainSec: Long?) {
         if (storeRemainSec == null) return
         val now = System.currentTimeMillis()
-        val remain = demoDrive.remain(storeRemainSec, now)   // 데모 주행이 켜져 있으면 가상 주행 기준
+        val remain = demoDrive.remain(storeRemainSec, now, current.id)   // 데모 주행이 켜져 있으면 가상 주행 기준
         val updated = OrderScheduler.reschedule(current, now, remain) ?: return
         lifecycleScope.launch {
             try {

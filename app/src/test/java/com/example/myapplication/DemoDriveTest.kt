@@ -36,4 +36,13 @@ class DemoDriveTest {
         val (_, sendJam) = OrderScheduler.schedule(60_000, d.remain(1380, 60_000), 1200)
         assertEquals(send0 + 180_000, sendJam)           // 정체 3분 → 전송 3분 연기
     }
+
+    @Test
+    fun 주문마다_자기_도착_시간으로_줄어든다() {
+        val d = DemoDrive().apply { toggle() }
+        assertEquals(600L, d.remain(600, 0, "가까운 매장"))
+        assertEquals(1200L, d.remain(1200, 0, "먼 매장"))
+        assertEquals(540L, d.remain(600, 60_000, "가까운 매장"))
+        assertEquals(1140L, d.remain(1200, 60_000, "먼 매장"))   // 예전엔 둘 다 540이 됨
+    }
 }
