@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
     private var order by mutableStateOf<Order?>(null)   // 5단계: 진행 중인 주문
     private var orderText by mutableStateOf("")
     private var waypointAdded = false                 // 6단계: 매장을 내비 경유지로 추가했는지
+    private var storeIsDestination = false            // 경로가 없어 매장 자체로 길 안내를 시작했는지 (주문을 닫으면 안내도 끝냄)
     @Volatile private var waypointRemainSec: Long? = null  // 6단계: 내비가 준 매장(경유지)까지 남은 시간
 
     // 7단계: 음성 주문
@@ -558,6 +559,7 @@ class MainActivity : ComponentActivity() {
             waypointRemainSec = null
             demoDrive.reset()
             if (!newOrder.isDelivery && viaWaypoint) addStoreWaypoint(newOrder)   // 배달은 경로를 바꾸지 않음
+            storeIsDestination = !newOrder.isDelivery && !viaWaypoint
             val what = if (newOrder.isDelivery) "목적지 도착에 맞춰 배달 요청 중" else "도착 시간에 맞춰 주문 전달 중"
             OrderTrackingService.start(this@MainActivity, "${newOrder.storeName} · ${newOrder.menuName}: $what")
             renderOrder()
@@ -649,6 +651,16 @@ class MainActivity : ComponentActivity() {
     private fun clearOrder(message: String) {
         if (waypointAdded) naviHelper.removeWaypoint(WaypointIndex.FIRST)
         waypointAdded = false
+        // 매장으로 가던 안내를 남겨 두면 다음 주문에서 그 매장을 목적지로 착각함 → 안내도 끝냄
+        if (storeIsDestination) {
+            naviHelper.cancelRoute()
+            routeActive = false
+            lastRemainSec = null
+            lastRemain = null
+            Log.d(TAG, "매장 길 안내 종료")
+            lifecycleScope.launch { delay(1500); naviHelper.getDestinationInfo() }   // 화면의 목적지 표시 갱신
+        }
+        storeIsDestination = false
         waypointRemainSec = null
         order = null
         OrderTrackingService.stop(this)
