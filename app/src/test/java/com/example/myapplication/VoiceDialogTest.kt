@@ -295,6 +295,46 @@ class VoiceDialogTest {
         assertTrue(done.say, done.say.contains("가까운 매장부터"))
     }
 
+    @Test
+    fun 승낙이_아닌_말로는_주문하지_않는다() {
+        // "콜라"의 콜, "예약"의 예, "안 좋아"의 좋아, "방금 뭐라고"의 방금, "처음부터"의 처음에 걸려 주문되던 문제
+        for (say in listOf("콜라 있어?", "콜라 있어", "안 좋아", "예약돼?", "방금 뭐라고 했어?", "아까 그거 뭐야?", "얼마라고?")) {
+            val d = dialog()
+            d.start()
+            d.handle("국물 픽업")
+            val r = d.handle(say)
+            assertNull(say, r.order)
+            assertTrue(say, r.listen)
+        }
+    }
+
+    @Test
+    fun 질문하면_제안을_다시_읽어_준다() {
+        val d = dialog()
+        d.start()
+        d.handle("국물 픽업")
+        assertTrue(d.handle("뭐라고?").say.contains("다시 말씀드릴게요. 한끼찌개의 김치찌개, 9000원"))
+    }
+
+    @Test
+    fun 처음부터_다시라고_하면_음식부터_다시_묻는다() {
+        val d = dialog()
+        d.start()
+        d.handle("국물 픽업")
+        val r = d.handle("처음부터 다시 할래")
+        assertNull(r.order)
+        assertTrue(r.say.contains("무엇을 드시고 싶으세요"))
+        assertEquals(VoiceDialog.MODE_QUESTION, d.handle("치킨").say)   // 픽업도 버렸으니 다시 물음
+    }
+
+    @Test
+    fun 짧은_승낙은_낱말_그대로일_때만() {
+        for (yes in listOf("네", "넵", "응", "예", "콜", "ㅇㅇ", "네 주문해 주세요", "응 좋아", "네네"))
+            assertEquals(yes, VoiceParser.Answer.YES, VoiceParser.answer(yes))
+        for (no in listOf("콜라", "예약", "응답", "네가 골라"))
+            assertEquals(no, VoiceParser.Answer.UNKNOWN, VoiceParser.answer(no))
+    }
+
     // ---------- 종료·무응답 ----------
 
     @Test

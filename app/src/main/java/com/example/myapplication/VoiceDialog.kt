@@ -80,6 +80,11 @@ class VoiceDialog(
     /** STT 최종 결과(또는 대체 버튼 입력)를 받아 다음 응답을 만듦 */
     fun handle(text: String): Reply {
         if (VoiceParser.isCancel(text)) return cancel()
+        // "처음부터 다시" → 고른 조건을 모두 버리고 음식부터 다시
+        if (state != State.Idle && VoiceParser.wantsRestart(text)) {
+            start()
+            return Reply("처음부터 다시 할게요. $FOOD_QUESTION", listen = true)
+        }
         return when (val s = state) {
             State.Idle -> start()
             State.AskingFood -> onFood(text)
@@ -202,16 +207,18 @@ class VoiceDialog(
             misses = 0
             return Reply("그럼 다른 걸 찾아볼게요. $FOOD_QUESTION", listen = true)
         }
-        // "방금 거로 해 줘", "처음 거" → 앞서 들은 메뉴로 바로 주문
-        if (VoiceParser.wantsFirst(text)) return order(s.recs[0])
-        if (VoiceParser.wantsPrevious(text)) return order(s.recs[(s.index - 1).coerceAtLeast(0)])
-        // "더 싼 거" → 남은 후보 중 지금보다 싼 메뉴
+        // "더 싼 거 (있어?)" → 남은 후보 중 지금보다 싼 메뉴
         if (VoiceParser.wantsCheaper(text)) {
             val cur = s.recs[s.index]
             val cheaper = s.recs.withIndex().filter { it.value.menu.price < cur.menu.price }.minByOrNull { it.value.menu.price }
             return if (cheaper != null) { misses = 0; propose(s.recs, cheaper.index) }
             else Reply("이게 가장 싼 메뉴예요. 주문할까요?", listen = true)
         }
+        // "뭐라고?", "얼마라고?", "콜라 있어?", "아까 그거 뭐야?" 같은 질문은 승낙이 아님 → 주문하지 않고 제안을 다시 읽음
+        if (VoiceParser.isQuestion(text)) return propose(s.recs, s.index, prefix = "다시 말씀드릴게요. ")
+        // "방금 거로 해 줘", "처음 거" → 앞서 들은 메뉴로 바로 주문
+        if (VoiceParser.wantsFirst(text)) return order(s.recs[0])
+        if (VoiceParser.wantsPrevious(text)) return order(s.recs[(s.index - 1).coerceAtLeast(0)])
         return when (VoiceParser.answer(text)) {
             VoiceParser.Answer.YES -> order(s.recs[s.index])
             VoiceParser.Answer.NO ->
@@ -308,13 +315,23 @@ object VoiceParser {
     private val PICKUP_WORDS = listOf("포장", "픽업", "들러", "들를", "들렀", "가는 길", "가는길", "직접",
         "가지러", "찾으러", "받으러", "테이크아웃", "내가 갈", "가서 받")
 
-    private val NO_WORDS = listOf("아니", "싫", "다른", "다음", "별로", "별론", "별루", "말고", "노노", "패스", "바꿔", "안 할", "안할")
-    private val YES_WORDS = listOf("응", "네", "예", "좋아", "좋네", "좋습니다", "그래", "주문", "해줘", "해 줘", "오케이",
-        "콜", "걸로", "그거", "부탁", "할게", "할래", "먹을게", "갈게", "맞아", "가자", "고고", "ㅇㅇ", "yes", "ok")
+    private val NO_WORDS = listOf("아니", "싫", "다른", "다음", "별로", "별론", "별루", "안 좋", "안좋", "안 돼", "안돼", "말고", "노노", "패스", "바꿔", "안 할", "안할")
+    private val YES_WORDS = listOf("좋아", "좋네", "좋습니다", "그래", "주문", "해줘", "해 줘", "오케이",
+        "걸로", "그거", "부탁", "할게", "할래", "먹을게", "갈게", "맞아", "가자", "고고")
+    /** 짧은 대답은 낱말 전체가 같을 때만 승낙 ("예약", "콜라", "응답", "네가"에서 걸리지 않게) */
+    private val SHORT_YES = setOf("응", "웅", "네", "넵", "넹", "예", "콜", "ㅇㅇ", "ㅇㅋ", "yes", "ok", "okay",
+        "네네", "응응", "예예", "네요", "예요", "넵넵")
     private val CANCEL_WORDS = listOf("취소", "그만", "됐어", "안 먹", "안먹")
     /** "방금 거", "아까 그거" → 바로 앞에 제안한 메뉴 / "처음 거" → 첫 제안 */
-    private val PREV_WORDS = listOf("방금", "아까", "이전", "앞에", "전에 거", "전에거", "전 거")
-    private val FIRST_WORDS = listOf("처음", "첫 번째", "첫번째", "맨 앞")
+    // "방금 뭐라고 했어?"처럼 메뉴를 가리키지 않는 말까지 주문으로 받지 않도록 "거·걸·그·메뉴"가 붙은 경우만
+    private val PREV_WORDS = listOf("방금 거", "방금거", "방금 걸", "방금 그", "방금 메뉴", "아까 거", "아까거", "아까 걸", "아까 그",
+        "아까 메뉴", "이전 거", "이전 메뉴", "앞에 거", "앞에 메뉴", "전에 거", "전에거", "전 거")
+    private val FIRST_WORDS = listOf("처음 거", "처음거", "처음 걸", "처음 메뉴", "첫 번째", "첫번째", "맨 앞", "맨 처음 거")
+    /** "처음부터 다시" → 대화를 처음부터 */
+    private val RESTART_WORDS = listOf("처음부터", "다시 시작", "새로 시작")
+    /** 주문을 승낙한 게 아니라 묻는 말 */
+    private val QUESTION_WORDS = listOf("뭐라고", "뭐라 했", "뭐라고 했", "다시 말", "다시 한 번", "다시 한번", "얼마", "몇 분",
+        "있어?", "있나", "있어요?", "돼?", "되나", "돼요?", "되요?", "되는", "뭐야", "뭐예요", "어디야", "어디예요")
     private val CHEAPER_WORDS = listOf("싼", "저렴", "싸게")
 
     /** 말 → 메뉴 태그 (stores_seed.json의 tags와 같은 이름) */
@@ -406,11 +423,15 @@ object VoiceParser {
         val t = text.trim().lowercase()
         if (t == "노" || NO_WORDS.any { it in t }) return Answer.NO
         if (YES_WORDS.any { it in t }) return Answer.YES
+        val words = t.split(Regex("[\\s,.!~?]+")).filter { it.isNotEmpty() }
+        if (words.any { it in SHORT_YES }) return Answer.YES
         return Answer.UNKNOWN
     }
 
     fun wantsPrevious(text: String) = PREV_WORDS.any { it in text }
     fun wantsFirst(text: String) = FIRST_WORDS.any { it in text }
+    fun wantsRestart(text: String) = RESTART_WORDS.any { it in text }
+    fun isQuestion(text: String) = QUESTION_WORDS.any { it in text }
     fun wantsCheaper(text: String) = CHEAPER_WORDS.any { it in text }
 
     fun tags(text: String): Set<String> {
