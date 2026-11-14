@@ -416,6 +416,28 @@ class VoiceDialogTest {
         assertFalse(d.isActive)
     }
 
+    @Test
+    fun 이미_주문한_메뉴는_한_번_더_묻는다() {
+        val d = VoiceDialog(::fakeRecommend, alreadyOrdered = { it.menu.name == "김치찌개" })
+        d.start()
+        d.handle("국물 픽업")
+        val ask = d.handle("네")
+        assertNull(ask.order)
+        assertTrue(ask.say, ask.say.contains("김치찌개는 이미 주문하셨어요. 하나 더 주문할까요?"))
+        assertEquals("김치찌개", d.handle("네").order!!.menu.name)   // 한 번 더 "네"면 주문
+    }
+
+    @Test
+    fun 이미_주문한_메뉴를_묻고_아니라고_하면_다음_후보() {
+        val d = VoiceDialog(::fakeRecommend, alreadyOrdered = { it.menu.name == "김치찌개" })
+        d.start()
+        d.handle("국물 픽업")
+        d.handle("네")
+        val next = d.handle("아니")
+        assertNull(next.order)
+        assertTrue(next.say.contains("된장찌개"))
+    }
+
     // ---------- 종료·무응답 ----------
 
     @Test

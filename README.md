@@ -178,7 +178,7 @@ Firestore에 매장이 없으면 첫 주문 때 앱이 가상 매장 25곳(`stor
 
 ## 테스트
 
-SDK와 무관한 핵심 로직은 순수 Kotlin으로 분리해 PC에서 단위 테스트합니다 (93개).
+SDK와 무관한 핵심 로직은 순수 Kotlin으로 분리해 PC에서 단위 테스트합니다 (95개).
 
 ```bash
 ./gradlew testDebugUnitTest

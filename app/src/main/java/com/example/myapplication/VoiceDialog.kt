@@ -28,7 +28,9 @@ class VoiceDialog(
     /** 이미 들를 픽업 매장이 있는지 (있으면 가까운 곳부터 들르도록 경로를 다시 짬) */
     private val pickupsPending: () -> Boolean = { false },
     /** 내비 목적지 이름 (배달 장소를 말했는데 목적지와 다를 때 안내용) */
-    private val destinationName: () -> String = { "" }
+    private val destinationName: () -> String = { "" },
+    /** 같은 매장의 같은 메뉴를 이미 주문해 두었는지 (실수로 두 번 주문하지 않게 한 번 더 물음) */
+    private val alreadyOrdered: (Recommendation) -> Boolean = { false }
 ) {
     /** 앱이 할 일: say를 읽고, listen이면 다시 듣고, order가 있으면 주문 (place가 있으면 그곳으로 배달) */
     data class Reply(val say: String, val listen: Boolean, val order: Recommendation? = null, val place: Place? = null)
@@ -49,6 +51,7 @@ class VoiceDialog(
     private var food: VoiceParser.Food? = null   // 치킨, 피자 같은 음식 종류 (태그보다 우선)
     private var qty = 1                          // "두 마리", "2개" → 2
     private var placeNotice = ""                 // 목적지가 아닌 곳으로 배달해 달라고 했을 때 제안 앞에 붙일 안내
+    private var dupAsked: Recommendation? = null // "이미 주문하셨어요. 하나 더?"를 물은 메뉴 (한 번 더 "네"면 주문)
 
     private val delivery get() = mode == VoiceParser.Mode.DELIVERY
 
@@ -63,6 +66,7 @@ class VoiceDialog(
         food = null
         qty = 1
         placeNotice = ""
+        dupAsked = null
         return Reply(FOOD_QUESTION, listen = true)
     }
 
@@ -255,6 +259,14 @@ class VoiceDialog(
     }
 
     private fun order(picked: Recommendation): Reply {
+        // 이미 주문한 메뉴면 바로 주문하지 않고 한 번 더 확인 (다시 시도하다 같은 주문이 두 번 들어가는 것 방지)
+        if (alreadyOrdered(picked) && dupAsked != picked) {
+            dupAsked = picked
+            val s = state as? State.Proposing
+            if (s != null) state = State.Proposing(s.recs, s.recs.indexOf(picked).coerceAtLeast(0))
+            return Reply("${spokenName(picked.store.name)}의 ${withEunNeun(picked.menu.name)} 이미 주문하셨어요. 하나 더 주문할까요?", listen = true)
+        }
+        dupAsked = null
         state = State.Idle
         // 수량은 메뉴 이름·가격에 담아 보냄 ("후라이드 치킨 ×2", 가격 ×2) → 매장 웹·서버 규칙을 바꾸지 않음
         val rec = if (qty > 1) picked.copy(menu = picked.menu.copy(name = "${picked.menu.name} ×$qty", price = picked.menu.price * qty)) else picked
