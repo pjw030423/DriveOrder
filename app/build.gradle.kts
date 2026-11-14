@@ -74,6 +74,8 @@ dependencies {
     implementation("ai.pleos.playground:SpeechToText:3.3.1")
     implementation("ai.pleos.playground:TextToSpeech:3.3.1")
     testImplementation(libs.junit)
+    // 단위 테스트에서 stores_seed.json을 읽기 위한 실제 org.json (Android 스텁 대신)
+    testImplementation("org.json:json:20231013")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

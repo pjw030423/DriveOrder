@@ -1,5 +1,5 @@
 {
-  "_comment": "DriveOrder 데모용 가상 매장·메뉴 데이터. 매장 이름·메뉴·가격은 모두 가상이며 실제 업체와 무관합니다. 좌표는 데모 경로(양재 42dot 근처 → 강남역) 주변의 대략적인 위치입니다. store_006·007은 경로 없이 '근처 픽업'을 시연하려고 출발지(성남 42dot) 근처에 둔 매장입니다.",
+  "_comment": "DriveOrder 데모용 가상 매장·메뉴 데이터. 매장 이름·메뉴·가격은 모두 가상이며 실제 업체와 무관합니다. store_006~013은 출발지(성남 42dot) 근처(경로 없을 때 픽업), store_014~020은 성남→강남역 가는 길 중간(경로 있을 때 픽업), store_001~005·021~025는 강남역 근처(배달·도착지 픽업)입니다. 음식 종류마다 세 지역에 후보가 있도록 배치했습니다.",
   "version": 1,
   "stores": [
     {
@@ -10,7 +10,7 @@
       "lng": 127.0283,
       "address": "서울 강남구 강남역 인근 (가상)",
       "openHour": 10,
-      "closeHour": 22,
+      "closeHour": 24,
       "pickupAvailable": true,
       "deliveryAvailable": true,
       "isDemo": true,
@@ -28,7 +28,7 @@
       "lng": 127.031,
       "address": "서울 강남구 역삼동 인근 (가상)",
       "openHour": 9,
-      "closeHour": 23,
+      "closeHour": 24,
       "pickupAvailable": true,
       "deliveryAvailable": true,
       "isDemo": true,
@@ -45,15 +45,16 @@
       "lat": 37.487,
       "lng": 127.035,
       "address": "서울 서초구 양재동 인근 (가상)",
-      "openHour": 11,
-      "closeHour": 21,
+      "openHour": 10,
+      "closeHour": 24,
       "pickupAvailable": true,
       "deliveryAvailable": false,
       "isDemo": true,
       "menus": [
         { "id": "m_003_1", "name": "잔치국수", "price": 7000, "cookMin": 6, "tags": ["국물", "빠름", "1인", "식사"] },
         { "id": "m_003_2", "name": "비빔국수", "price": 7500, "cookMin": 6, "tags": ["매운", "빠름", "1인", "식사"] },
-        { "id": "m_003_3", "name": "김밥", "price": 4000, "cookMin": 4, "tags": ["빠름", "간식"] }
+        { "id": "m_003_3", "name": "김밥", "price": 4000, "cookMin": 4, "tags": ["빠름", "간식"] },
+        { "id": "m_003_4", "name": "떡볶이", "price": 5000, "cookMin": 5, "tags": ["매운", "빠름", "간식"] }
       ]
     },
     {
@@ -64,14 +65,15 @@
       "lng": 127.0265,
       "address": "서울 강남구 강남역 인근 (가상)",
       "openHour": 8,
-      "closeHour": 20,
+      "closeHour": 24,
       "pickupAvailable": true,
       "deliveryAvailable": true,
       "isDemo": true,
       "menus": [
         { "id": "m_004_1", "name": "닭가슴살 샐러드", "price": 9900, "cookMin": 5, "tags": ["가벼움", "1인", "식사"] },
         { "id": "m_004_2", "name": "연어 포케", "price": 12900, "cookMin": 7, "tags": ["가벼움", "1인", "식사"] },
-        { "id": "m_004_3", "name": "아메리카노", "price": 3500, "cookMin": 2, "tags": ["음료", "빠름"] }
+        { "id": "m_004_3", "name": "아메리카노", "price": 3500, "cookMin": 2, "tags": ["음료", "빠름"] },
+        { "id": "m_004_4", "name": "닭가슴살 샌드위치", "price": 7500, "cookMin": 4, "tags": ["가벼움", "빠름", "1인", "식사"] }
       ]
     },
     {
@@ -81,15 +83,15 @@
       "lat": 37.493,
       "lng": 127.032,
       "address": "서울 서초구 서초동 인근 (가상)",
-      "openHour": 15,
+      "openHour": 10,
       "closeHour": 24,
       "pickupAvailable": true,
       "deliveryAvailable": true,
       "isDemo": true,
       "menus": [
-        { "id": "m_005_1", "name": "후라이드 치킨", "price": 19000, "cookMin": 20, "tags": ["여럿", "야식"] },
-        { "id": "m_005_2", "name": "양념 치킨", "price": 20000, "cookMin": 20, "tags": ["여럿", "매운", "야식"] },
-        { "id": "m_005_3", "name": "치킨 반반", "price": 20000, "cookMin": 20, "tags": ["여럿", "야식"] }
+        { "id": "m_005_1", "name": "후라이드 치킨", "price": 19000, "cookMin": 15, "tags": ["여럿", "야식"] },
+        { "id": "m_005_2", "name": "양념 치킨", "price": 20000, "cookMin": 15, "tags": ["여럿", "매운", "야식"] },
+        { "id": "m_005_3", "name": "치킨 반반", "price": 20000, "cookMin": 15, "tags": ["여럿", "야식"] }
       ]
     },
     {
@@ -107,7 +109,9 @@
       "menus": [
         { "id": "m_006_1", "name": "참치김밥", "price": 4500, "cookMin": 3, "tags": ["빠름", "간식"] },
         { "id": "m_006_2", "name": "라볶이", "price": 7000, "cookMin": 8, "tags": ["매운", "국물", "식사"] },
-        { "id": "m_006_3", "name": "제육덮밥", "price": 8500, "cookMin": 9, "tags": ["매운", "식사", "1인"] }
+        { "id": "m_006_3", "name": "제육덮밥", "price": 8500, "cookMin": 9, "tags": ["매운", "식사", "1인"] },
+        { "id": "m_006_4", "name": "떡볶이", "price": 5000, "cookMin": 5, "tags": ["매운", "빠름", "간식"] },
+        { "id": "m_006_5", "name": "라면", "price": 4500, "cookMin": 4, "tags": ["국물", "빠름", "1인", "식사"] }
       ]
     },
     {
@@ -126,6 +130,333 @@
         { "id": "m_007_1", "name": "돼지국밥", "price": 9000, "cookMin": 7, "tags": ["국물", "식사", "1인"] },
         { "id": "m_007_2", "name": "순대국밥", "price": 9000, "cookMin": 7, "tags": ["국물", "식사", "1인"] },
         { "id": "m_007_3", "name": "얼큰국밥", "price": 9500, "cookMin": 8, "tags": ["국물", "매운", "식사"] }
+      ]
+    },
+    {
+      "id": "store_008",
+      "name": "판교바삭치킨 (가상)",
+      "category": "치킨",
+      "lat": 37.4005,
+      "lng": 127.1105,
+      "address": "경기 성남시 판교 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_008_1", "name": "후라이드 치킨", "price": 19000, "cookMin": 15, "tags": ["여럿", "야식"] },
+        { "id": "m_008_2", "name": "양념 치킨", "price": 20000, "cookMin": 15, "tags": ["여럿", "매운", "야식"] },
+        { "id": "m_008_3", "name": "순살 치킨 1인 세트", "price": 12900, "cookMin": 12, "tags": ["1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_009",
+      "name": "성남짬뽕반점 (가상)",
+      "category": "중식",
+      "lat": 37.415,
+      "lng": 127.099,
+      "address": "경기 성남시 수정구 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_009_1", "name": "짜장면", "price": 7000, "cookMin": 6, "tags": ["빠름", "1인", "식사"] },
+        { "id": "m_009_2", "name": "짬뽕", "price": 8500, "cookMin": 7, "tags": ["국물", "매운", "1인", "식사"] },
+        { "id": "m_009_3", "name": "탕수육", "price": 16000, "cookMin": 12, "tags": ["여럿", "야식"] }
+      ]
+    },
+    {
+      "id": "store_010",
+      "name": "판교모닝카페 (가상)",
+      "category": "카페",
+      "lat": 37.395,
+      "lng": 127.111,
+      "address": "경기 성남시 판교 인근 (가상)",
+      "openHour": 7,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_010_1", "name": "아메리카노", "price": 3500, "cookMin": 2, "tags": ["음료", "빠름"] },
+        { "id": "m_010_2", "name": "카페라떼", "price": 4500, "cookMin": 3, "tags": ["음료", "빠름"] },
+        { "id": "m_010_3", "name": "햄치즈 샌드위치", "price": 6500, "cookMin": 4, "tags": ["가벼움", "빠름", "1인", "식사"] },
+        { "id": "m_010_4", "name": "그릭 샐러드", "price": 8900, "cookMin": 5, "tags": ["가벼움", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_011",
+      "name": "판교버거앤피자 (가상)",
+      "category": "패스트푸드",
+      "lat": 37.402,
+      "lng": 127.103,
+      "address": "경기 성남시 판교 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_011_1", "name": "불고기 버거 세트", "price": 8500, "cookMin": 6, "tags": ["빠름", "1인", "식사"] },
+        { "id": "m_011_2", "name": "페퍼로니 피자", "price": 18900, "cookMin": 15, "tags": ["여럿", "야식"] },
+        { "id": "m_011_3", "name": "감자튀김", "price": 3000, "cookMin": 4, "tags": ["빠름", "간식"] }
+      ]
+    },
+    {
+      "id": "store_012",
+      "name": "시흥동돈까스 (가상)",
+      "category": "일식",
+      "lat": 37.408,
+      "lng": 127.1,
+      "address": "경기 성남시 수정구 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_012_1", "name": "등심 돈까스", "price": 9500, "cookMin": 9, "tags": ["1인", "식사"] },
+        { "id": "m_012_2", "name": "우동", "price": 7500, "cookMin": 6, "tags": ["국물", "빠름", "1인", "식사"] },
+        { "id": "m_012_3", "name": "모둠 초밥", "price": 14900, "cookMin": 10, "tags": ["1인", "식사"] },
+        { "id": "m_012_4", "name": "연어 덮밥", "price": 11900, "cookMin": 7, "tags": ["가벼움", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_013",
+      "name": "시흥동집밥 (가상)",
+      "category": "한식",
+      "lat": 37.418,
+      "lng": 127.096,
+      "address": "경기 성남시 수정구 인근 (가상)",
+      "openHour": 7,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_013_1", "name": "김치찌개", "price": 9000, "cookMin": 9, "tags": ["국물", "매운", "1인", "식사"] },
+        { "id": "m_013_2", "name": "된장찌개", "price": 8500, "cookMin": 9, "tags": ["국물", "1인", "식사"] },
+        { "id": "m_013_3", "name": "제육 덮밥", "price": 9000, "cookMin": 8, "tags": ["매운", "1인", "식사"] },
+        { "id": "m_013_4", "name": "칼국수", "price": 8000, "cookMin": 8, "tags": ["국물", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_014",
+      "name": "세곡드라이브카페 (가상)",
+      "category": "카페",
+      "lat": 37.46,
+      "lng": 127.0585,
+      "address": "서울 강남구 세곡동 인근 (가상)",
+      "openHour": 7,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": false,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_014_1", "name": "아메리카노", "price": 3500, "cookMin": 2, "tags": ["음료", "빠름"] },
+        { "id": "m_014_2", "name": "카페라떼", "price": 4500, "cookMin": 3, "tags": ["음료", "빠름"] },
+        { "id": "m_014_3", "name": "베이글 샌드위치", "price": 6900, "cookMin": 4, "tags": ["가벼움", "빠름", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_015",
+      "name": "개포중화요리 (가상)",
+      "category": "중식",
+      "lat": 37.4706,
+      "lng": 127.0491,
+      "address": "서울 강남구 개포동 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": false,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_015_1", "name": "짜장면", "price": 7000, "cookMin": 6, "tags": ["빠름", "1인", "식사"] },
+        { "id": "m_015_2", "name": "짬뽕", "price": 8500, "cookMin": 7, "tags": ["국물", "매운", "1인", "식사"] },
+        { "id": "m_015_3", "name": "볶음밥", "price": 8000, "cookMin": 6, "tags": ["빠름", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_016",
+      "name": "양재피자 (가상)",
+      "category": "피자",
+      "lat": 37.479,
+      "lng": 127.043,
+      "address": "서울 서초구 양재동 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": false,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_016_1", "name": "페퍼로니 피자", "price": 18900, "cookMin": 12, "tags": ["여럿", "야식"] },
+        { "id": "m_016_2", "name": "1인 콤비네이션 피자", "price": 10900, "cookMin": 10, "tags": ["1인", "식사"] },
+        { "id": "m_016_3", "name": "치즈 오븐 스파게티", "price": 9900, "cookMin": 9, "tags": ["1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_017",
+      "name": "양재통닭 (가상)",
+      "category": "치킨",
+      "lat": 37.4815,
+      "lng": 127.042,
+      "address": "서울 서초구 양재동 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": false,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_017_1", "name": "후라이드 치킨", "price": 19000, "cookMin": 14, "tags": ["여럿", "야식"] },
+        { "id": "m_017_2", "name": "양념 치킨", "price": 20000, "cookMin": 14, "tags": ["여럿", "매운", "야식"] },
+        { "id": "m_017_3", "name": "순살 치킨 반마리", "price": 11900, "cookMin": 10, "tags": ["1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_018",
+      "name": "양재돈까스 (가상)",
+      "category": "일식",
+      "lat": 37.485,
+      "lng": 127.0378,
+      "address": "서울 서초구 양재동 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": false,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_018_1", "name": "등심 돈까스", "price": 9500, "cookMin": 8, "tags": ["1인", "식사"] },
+        { "id": "m_018_2", "name": "우동", "price": 7500, "cookMin": 5, "tags": ["국물", "빠름", "1인", "식사"] },
+        { "id": "m_018_3", "name": "모둠 초밥", "price": 14900, "cookMin": 10, "tags": ["1인", "식사"] },
+        { "id": "m_018_4", "name": "연어 덮밥", "price": 11900, "cookMin": 7, "tags": ["가벼움", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_019",
+      "name": "양재든든국밥 (가상)",
+      "category": "한식",
+      "lat": 37.476,
+      "lng": 127.0455,
+      "address": "서울 서초구 양재동 인근 (가상)",
+      "openHour": 0,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": false,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_019_1", "name": "순대국밥", "price": 9000, "cookMin": 7, "tags": ["국물", "식사", "1인"] },
+        { "id": "m_019_2", "name": "김치찌개", "price": 9000, "cookMin": 8, "tags": ["국물", "매운", "1인", "식사"] },
+        { "id": "m_019_3", "name": "제육 덮밥", "price": 9000, "cookMin": 8, "tags": ["매운", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_020",
+      "name": "양재버거 (가상)",
+      "category": "패스트푸드",
+      "lat": 37.474,
+      "lng": 127.047,
+      "address": "서울 서초구 양재동 인근 (가상)",
+      "openHour": 9,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": false,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_020_1", "name": "불고기 버거 세트", "price": 8500, "cookMin": 6, "tags": ["빠름", "1인", "식사"] },
+        { "id": "m_020_2", "name": "감자튀김", "price": 3000, "cookMin": 4, "tags": ["빠름", "간식"] }
+      ]
+    },
+    {
+      "id": "store_021",
+      "name": "강남역짜장 (가상)",
+      "category": "중식",
+      "lat": 37.496,
+      "lng": 127.03,
+      "address": "서울 강남구 역삼동 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_021_1", "name": "짜장면", "price": 7000, "cookMin": 6, "tags": ["빠름", "1인", "식사"] },
+        { "id": "m_021_2", "name": "짬뽕", "price": 8500, "cookMin": 7, "tags": ["국물", "매운", "1인", "식사"] },
+        { "id": "m_021_3", "name": "탕수육", "price": 16000, "cookMin": 12, "tags": ["여럿", "야식"] }
+      ]
+    },
+    {
+      "id": "store_022",
+      "name": "강남돈까스 (가상)",
+      "category": "일식",
+      "lat": 37.5005,
+      "lng": 127.027,
+      "address": "서울 강남구 강남역 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_022_1", "name": "등심 돈까스", "price": 9500, "cookMin": 8, "tags": ["1인", "식사"] },
+        { "id": "m_022_2", "name": "우동", "price": 7500, "cookMin": 5, "tags": ["국물", "빠름", "1인", "식사"] },
+        { "id": "m_022_3", "name": "모둠 초밥", "price": 14900, "cookMin": 10, "tags": ["1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_023",
+      "name": "신논현떡볶이 (가상)",
+      "category": "분식",
+      "lat": 37.503,
+      "lng": 127.025,
+      "address": "서울 강남구 논현동 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_023_1", "name": "떡볶이", "price": 5000, "cookMin": 5, "tags": ["매운", "빠름", "간식"] },
+        { "id": "m_023_2", "name": "라면", "price": 4500, "cookMin": 4, "tags": ["국물", "빠름", "1인", "식사"] },
+        { "id": "m_023_3", "name": "김밥", "price": 4000, "cookMin": 3, "tags": ["빠름", "간식"] },
+        { "id": "m_023_4", "name": "잔치국수", "price": 6500, "cookMin": 5, "tags": ["국물", "빠름", "1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_024",
+      "name": "강남화덕피자 (가상)",
+      "category": "피자",
+      "lat": 37.4995,
+      "lng": 127.03,
+      "address": "서울 강남구 강남역 인근 (가상)",
+      "openHour": 10,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_024_1", "name": "페퍼로니 피자", "price": 18900, "cookMin": 12, "tags": ["여럿", "야식"] },
+        { "id": "m_024_2", "name": "1인 콤비네이션 피자", "price": 10900, "cookMin": 10, "tags": ["1인", "식사"] }
+      ]
+    },
+    {
+      "id": "store_025",
+      "name": "역삼순대국 (가상)",
+      "category": "한식",
+      "lat": 37.5,
+      "lng": 127.033,
+      "address": "서울 강남구 역삼동 인근 (가상)",
+      "openHour": 0,
+      "closeHour": 24,
+      "pickupAvailable": true,
+      "deliveryAvailable": true,
+      "isDemo": true,
+      "menus": [
+        { "id": "m_025_1", "name": "순대국밥", "price": 9000, "cookMin": 7, "tags": ["국물", "식사", "1인"] },
+        { "id": "m_025_2", "name": "얼큰 순대국", "price": 9500, "cookMin": 8, "tags": ["국물", "매운", "식사"] },
+        { "id": "m_025_3", "name": "제육 덮밥", "price": 9000, "cookMin": 8, "tags": ["매운", "1인", "식사"] }
       ]
     }
   ]

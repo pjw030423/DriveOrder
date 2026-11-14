@@ -313,4 +313,103 @@ class VoiceDialogTest {
         assertEquals(VoiceParser.Answer.NO, VoiceParser.answer("다른 거"))
         assertEquals(VoiceParser.Answer.UNKNOWN, VoiceParser.answer("어떤 게 있어"))
     }
+
+    // ---------- 유연한 대답 (2026-11-14) ----------
+
+    private val pizza = Store("s3", "양재피자 (가상)", "피자", 0.0, 0.0, 0, 24, true, true, listOf(
+        menu("m4", "페퍼로니 피자", 18900, 12, "여럿"),
+        menu("m5", "1인 콤비네이션 피자", 10900, 10, "식사")))
+
+    private fun richDialog() = VoiceDialog({ tags, _, _ ->
+        val list = listOf(rec(jjigae, 0), rec(jjigae, 1), rec(chicken, 0), rec(pizza, 0), rec(pizza, 1))
+        if (tags.isEmpty()) list else list.filter { r -> r.menu.tags.any { it in tags } }
+    })
+
+    @Test
+    fun 비슷한_말도_음식으로_알아듣는다() {
+        assertEquals("치킨", VoiceParser.foodKeyword("통닭 땡기네"))
+        assertEquals("떡볶이", VoiceParser.foodKeyword("떡뽁이 먹을래"))
+        assertEquals("커피", VoiceParser.foodKeyword("아메리카노 한 잔"))
+        assertEquals("중식", VoiceParser.foodKeyword("탕수육 어때"))
+        assertFalse("국물" in VoiceParser.tags("탕수육"))           // '탕'수육은 국물이 아님
+        assertEquals("피자", VoiceParser.foodKeyword("치킨 말고 피자"))
+    }
+
+    @Test
+    fun 방식도_여러_말로_알아듣는다() {
+        assertEquals(VoiceParser.Mode.PICKUP, VoiceParser.mode("내가 가지러 갈게"))
+        assertEquals(VoiceParser.Mode.DELIVERY, VoiceParser.mode("갖다 줘"))
+        assertEquals(VoiceParser.Mode.PICKUP, VoiceParser.mode("배달 말고"))
+        assertEquals(VoiceParser.Mode.DELIVERY, VoiceParser.mode("픽업 말고 배달"))
+    }
+
+    @Test
+    fun 음식_종류가_태그보다_우선() {
+        val d = richDialog()
+        d.start()
+        // '배고파'(식사 태그)에 치킨 메뉴는 없지만 치킨을 말했으므로 치킨을 제안
+        assertTrue(d.handle("배고파 치킨 픽업").say.contains("후라이드 치킨"))
+    }
+
+    @Test
+    fun 원하는_음식이_없으면_대신_다른_메뉴를_제안() {
+        val d = dialog()
+        d.start()
+        val r = d.handle("피자 픽업")
+        assertTrue(r.say.startsWith("가는 길에 피자가 없어요. 대신 "))
+        assertTrue(r.listen)
+        assertEquals("김치찌개", d.handle("네").order!!.menu.name)
+    }
+
+    @Test
+    fun 제안_중_다른_음식으로_바꾼다() {
+        val d = richDialog()
+        d.start()
+        assertTrue(d.handle("치킨 픽업").say.contains("후라이드 치킨"))
+        assertTrue(d.handle("치킨 말고 피자").say.contains("피자"))
+    }
+
+    @Test
+    fun 방금_거로_하면_앞서_제안한_메뉴를_주문() {
+        val d = dialog()
+        d.start()
+        d.handle("국물 픽업")                         // 김치찌개
+        assertTrue(d.handle("다른 거").say.contains("된장찌개"))
+        assertEquals("김치찌개", d.handle("아니 방금 거로 주문해 줘").order!!.menu.name)
+    }
+
+    @Test
+    fun 처음_거로_하면_첫_제안을_주문() {
+        val d = dialog()
+        d.start()
+        d.handle("아무거나 픽업")
+        d.handle("아니")
+        d.handle("다음")
+        assertEquals("김치찌개", d.handle("처음 거로 할게").order!!.menu.name)
+    }
+
+    @Test
+    fun 더_싼_거를_찾는다() {
+        val d = richDialog()
+        d.start()
+        assertTrue(d.handle("피자 픽업").say.contains("페퍼로니 피자"))
+        assertTrue(d.handle("더 싼 거 없어?").say.contains("1인 콤비네이션 피자"))
+        assertTrue(d.handle("더 싼 거").say.contains("가장 싼"))
+    }
+
+    @Test
+    fun 같은_방식을_다시_말하면_주문으로_받는다() {
+        val d = dialog()
+        d.start()
+        d.handle("치킨 배달")
+        assertTrue(d.handle("배달로 주문해 줘").order!!.delivery)   // 다시 찾지 않고 바로 주문
+    }
+
+    @Test
+    fun 여러_긍정_표현() {
+        for (t in listOf("그걸로", "좋아요", "그거 부탁해", "먹을게", "ㅇㅇ", "콜"))
+            assertEquals(t, VoiceParser.Answer.YES, VoiceParser.answer(t))
+        for (t in listOf("별로야", "패스", "싫어", "노"))
+            assertEquals(t, VoiceParser.Answer.NO, VoiceParser.answer(t))
+    }
 }

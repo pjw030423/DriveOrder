@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
     private var listenAfterSpeak = false              // 안내를 다 읽은 뒤 바로 들을지
     private var listenTimeout: Job? = null            // 듣는 중 무응답 타이머 (STT는 무음이면 끝나지 않음)
     private val voiceDialog = VoiceDialog(
-        recommend = { tags, delivery, place -> computeRecs(tags, limit = 10, delivery = delivery, place = place) },
+        recommend = { tags, delivery, place -> computeRecs(tags, limit = 100, delivery = delivery, place = place) },
         hasDestination = { hasRoute() },
         // 질문에서 앞의 3곳만 읽음: 집·회사 → 데모 장소(강남역) → 최근 목적지
         // 최근 목적지 중 가상 매장(픽업하러 갔던 곳)은 배달 장소에서 뺌
