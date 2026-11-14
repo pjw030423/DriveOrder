@@ -113,7 +113,7 @@ scheduled(전송 대기) → sent(매장 접수 대기) → cooking(조리 중) 
 ### 준비물
 
 - Android Studio (AGP 9.5, Kotlin 2.2, compileSdk 37 / minSdk 28)
-- Pleos Connect Emulator v2.1.0 (Android Automotive, API 34) — [설치 가이드](https://document.pleos.ai/docs/connect/guide/getting-started/application-development/setup-connect-sdk-emulator)
+- Pleos Connect Emulator v2.1.0 (Android Automotive, API 34, 화면 2560×1440 · 160dpi) — [설치 가이드](https://document.pleos.ai/docs/connect/guide/getting-started/application-development/setup-connect-sdk-emulator)
 - Firebase 프로젝트의 Firestore (프로젝트 ID는 `FirestoreRest.kt`의 `PROJECT_ID`)
 
 ### 1. 에뮬레이터 실행
