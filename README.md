@@ -176,6 +176,18 @@ Firestore에 매장이 없으면 첫 주문 때 앱이 가상 매장 25곳(`stor
 
 > 가상 매장은 모두 늦어도 10시에 열고 자정에 닫습니다. 10시 전에는 아침에 여는 매장(김밥·국밥·카페 등)만 추천되고, 원하는 음식이 없으면 대신 고를 만한 메뉴를 제안합니다.
 
+### 5. 데이터 백업·복원
+
+Firestore의 매장·주문 데이터를 내 PC의 `backup/<날짜-시각>/`에 저장합니다 (git에는 올리지 않음).
+
+```bash
+python tools/firestore_backup.py                # 매장·주문 백업
+python tools/firestore_backup.py --update-seed  # 백업 + 서버의 매장 데이터로 시드 파일 갱신 (바뀌면 커밋)
+python tools/firestore_restore.py               # 시드(또는 지정한 백업 파일)의 매장을 다시 올림
+```
+
+`firestore.rules`를 적용하면 매장 쓰기가 막혀 복원은 Firebase 콘솔에서 해야 합니다.
+
 ## 테스트
 
 SDK와 무관한 핵심 로직은 순수 Kotlin으로 분리해 PC에서 단위 테스트합니다 (95개).

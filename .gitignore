@@ -23,3 +23,6 @@ keystore.properties
 *.jks
 # 내부 보고서 (PC 경로·서명 키 위치 포함, 제출용 아님)
 /docs/
+
+# Firestore 백업 (tools/firestore_backup.py 로 만듦, 내 PC에만 보관)
+/backup/
